@@ -4,6 +4,7 @@ import PackageDescription
 
 let package = Package(
   name: "MultiCodexPets",
+  defaultLocalization: "en",
   platforms: [
     .macOS(.v13)
   ],
@@ -15,7 +16,8 @@ let package = Package(
     .target(name: "MultiCodexPetsCore"),
     .executableTarget(
       name: "MultiCodexPets",
-      dependencies: ["MultiCodexPetsCore"]
+      dependencies: ["MultiCodexPetsCore"],
+      resources: [.process("Resources")]
     ),
     .testTarget(
       name: "MultiCodexPetsCoreTests",

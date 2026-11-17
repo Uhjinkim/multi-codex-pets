@@ -9,6 +9,77 @@ final class PetCoordinator {
   private var walkingTimer: Timer?
   private var lastWalkingTickAt: Date?
   private var walksAround = false
+  private var followsCursor = true
+  private var preferences: [String: PetPreferences] = [:]
+  private var clickVolume: Float = 1
+  var onPreferencesChanged: ((String, PetPreferences) -> Void)?
+  var onContextMenu: ((String) -> NSMenu?)?
+
+  func configure(preferences: [String: PetPreferences], clickVolume: Float) {
+    self.preferences = preferences
+    self.clickVolume = clickVolume
+    for (id, controller) in windowControllersByPetID {
+      let preference = preferences[id] ?? PetPreferences()
+      controller.setInteraction(
+        volume: clickVolume, muted: preference.muted, locked: preference.positionLocked)
+      controller.setNameLabel(preference.displayName(fallback: controller.pet.displayName),
+        style: preference.nameLabel ?? PetNameLabel())
+    }
+    updateWalkingTimer()
+  }
+
+  func setSessionTooltips(_ values: [String: String]) {
+    for (id, controller) in windowControllersByPetID {
+      controller.setSessionTooltip(values[id] ?? controller.pet.displayName)
+    }
+  }
+
+  func movePet(_ id: String, to screen: NSScreen) {
+    guard let controller = windowControllersByPetID[id], let frame = controller.currentFrame else {
+      return
+    }
+    let target = PetPlacement.fitted(
+      CGRect(
+        x: screen.visibleFrame.midX - frame.width / 2,
+        y: screen.visibleFrame.minY + 80, width: frame.width, height: frame.height),
+      to: screen.visibleFrame)
+    controller.setFrameOrigin(target.origin)
+    remember(id, frame: target, screen: screen)
+  }
+
+  func recoverPets() {
+    for (id, controller) in windowControllersByPetID {
+      guard let frame = controller.currentFrame else { continue }
+      let screen = screenForPet(id, frame: frame)
+      let fitted = PetPlacement.fitted(frame, to: screen.visibleFrame)
+      controller.setFrameOrigin(fitted.origin)
+      remember(id, frame: fitted, screen: screen)
+    }
+  }
+
+  private func screenForPet(_ id: String, frame: NSRect? = nil) -> NSScreen {
+    let saved = preferences[id]?.screenID
+    return NSScreen.screens.first {
+      ($0.deviceDescription[NSDeviceDescriptionKey(rawValue: "NSScreenNumber")] as? NSNumber)?
+        .uint32Value == saved
+    }
+      ?? frame.flatMap { frame in NSScreen.screens.first { $0.visibleFrame.intersects(frame) } }
+      ?? NSScreen.main ?? NSScreen.screens[0]
+  }
+
+  private func remember(_ id: String, frame: NSRect, screen: NSScreen? = nil) {
+    rememberedFramesByPetID[id] = frame
+    var preference = preferences[id] ?? PetPreferences()
+    preference.frame = frame
+    let target =
+      screen
+      ?? NSScreen.screens.first { $0.visibleFrame.contains(CGPoint(x: frame.midX, y: frame.midY)) }
+    preference.screenID =
+      (target?.deviceDescription[NSDeviceDescriptionKey(rawValue: "NSScreenNumber")] as? NSNumber)?
+      .uint32Value
+    preferences[id] = preference
+    onPreferencesChanged?(id, preference)
+  }
 
   var isShowingPets: Bool {
     !visiblePetIDs.isEmpty
@@ -35,6 +106,7 @@ final class PetCoordinator {
       let controller =
         existingController(for: package)
         ?? makeController(for: package, index: index, state: state, scale: scale)
+      controller.setFollowsCursor(followsCursor)
       controller.setScale(scale)
       let now = Date()
       let motion = walkingMotion(
@@ -69,6 +141,18 @@ final class PetCoordinator {
     for controller in visibleControllers {
       controller.setAnimationState(state)
     }
+  }
+
+  func setSessionAnimations(_ states: [AnimationState]) {
+    guard !walksAround else { return }
+    for (petID, state) in zip(visiblePetIDs, states) {
+      windowControllersByPetID[petID]?.setAnimationState(state)
+    }
+  }
+
+  func setFollowsCursor(_ enabled: Bool) {
+    followsCursor = enabled
+    for controller in visibleControllers { controller.setFollowsCursor(enabled) }
   }
 
   func setScale(_ scale: Double) {
@@ -125,12 +209,20 @@ final class PetCoordinator {
     state: AnimationState,
     scale: Double
   ) -> PetWindowController {
-    PetWindowController(
+    let controller = PetWindowController(
       pet: package,
       initialFrame: initialFrame(forPetID: package.id, index: index, scale: scale),
       animationState: state,
       scale: scale
     )
+    let preference = preferences[package.id] ?? PetPreferences()
+    controller.setInteraction(
+      volume: clickVolume, muted: preference.muted, locked: preference.positionLocked)
+    controller.setNameLabel(preference.displayName(fallback: package.displayName),
+      style: preference.nameLabel ?? PetNameLabel())
+    controller.onFrameChanged = { [weak self] frame in self?.remember(package.id, frame: frame) }
+    controller.setContextMenuProvider { [weak self] in self?.onContextMenu?(package.id) }
+    return controller
   }
 
   private func closeController(forPetID petID: String) {
@@ -139,14 +231,16 @@ final class PetCoordinator {
     }
 
     if let frame = controller.currentFrame {
-      rememberedFramesByPetID[petID] = frame
+      remember(petID, frame: frame)
     }
     walkingMotionsByPetID.removeValue(forKey: petID)
     controller.close()
   }
 
   private func updateWalkingTimer() {
-    guard walksAround, !visiblePetIDs.isEmpty else {
+    guard walksAround,
+      visibleControllers.contains(where: { !$0.isPositionLocked })
+    else {
       walkingTimer?.invalidate()
       walkingTimer = nil
       lastWalkingTickAt = nil
@@ -172,7 +266,7 @@ final class PetCoordinator {
 
     for petID in visiblePetIDs {
       guard let controller = windowControllersByPetID[petID],
-        !controller.isUserDragging,
+        !controller.isUserDragging, !controller.isPositionLocked,
         let frame = controller.currentFrame
       else {
         continue
@@ -334,18 +428,17 @@ final class PetCoordinator {
   }
 
   private func initialFrame(forPetID petID: String, index: Int, scale: Double) -> NSRect {
-    if let rememberedFrame = rememberedFramesByPetID[petID] {
-      return NSRect(
-        origin: rememberedFrame.origin,
-        size: PetWindowController.windowSize(scale: scale)
-      )
+    let saved = rememberedFramesByPetID[petID] ?? preferences[petID]?.frame
+    let screen = screenForPet(petID, frame: saved)
+    if let saved {
+      return PetPlacement.fitted(
+        NSRect(origin: saved.origin, size: PetWindowController.windowSize(scale: scale)),
+        to: screen.visibleFrame)
     }
-
-    return defaultInitialFrame(index: index, scale: scale)
+    return defaultInitialFrame(index: index, scale: scale, screen: screen.visibleFrame)
   }
 
-  private func defaultInitialFrame(index: Int, scale: Double) -> NSRect {
-    let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+  private func defaultInitialFrame(index: Int, scale: Double, screen: NSRect) -> NSRect {
     let size = PetWindowController.windowSize(scale: scale)
     let horizontalStep = size.width + 22
     let rowOffset = CGFloat(index % 2) * 32

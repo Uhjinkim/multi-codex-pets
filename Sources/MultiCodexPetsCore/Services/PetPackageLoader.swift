@@ -58,7 +58,9 @@ public struct PetPackageLoader {
     guard let manifestData = try? Data(contentsOf: manifestURL),
       let manifest = try? JSONDecoder().decode(CodexPetManifest.self, from: manifestData),
       let spritesheetURL = resolveSpritesheetURL(manifest.spritesheetPath, in: directory),
-      isValidPetSpritesheet(spritesheetURL)
+      let dimensions = try? ImageDimensionsReader.read(url: spritesheetURL),
+      let spriteVersion = PetSpriteVersion(dimensions: dimensions),
+      manifest.spriteVersionNumber == nil || manifest.spriteVersionNumber == spriteVersion.rawValue
     else {
       return nil
     }
@@ -72,7 +74,8 @@ public struct PetPackageLoader {
       displayName: displayName,
       description: manifest.description,
       spritesheetURL: spritesheetURL,
-      packageDirectory: directory
+      packageDirectory: directory,
+      spriteVersion: spriteVersion
     )
   }
 
@@ -95,14 +98,6 @@ public struct PetPackageLoader {
     return resolved
   }
 
-  private func isValidPetSpritesheet(_ url: URL) -> Bool {
-    guard let dimensions = try? ImageDimensionsReader.read(url: url) else {
-      return false
-    }
-
-    return dimensions.width == PetAtlas.width
-      && dimensions.height == PetAtlas.height
-  }
 }
 
 private func fileManagerHomeDirectory() -> URL {

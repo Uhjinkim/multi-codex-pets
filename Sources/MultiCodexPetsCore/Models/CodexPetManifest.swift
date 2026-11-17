@@ -4,14 +4,17 @@ public struct CodexPetManifest: Decodable, Equatable {
   public let id: String?
   public let displayName: String?
   public let description: String?
+  public let spriteVersionNumber: Int?
   public let spritesheetPath: String
 
   public init(
     id: String? = nil,
     displayName: String? = nil,
     description: String? = nil,
-    spritesheetPath: String = "spritesheet.webp"
+    spritesheetPath: String = "spritesheet.webp",
+    spriteVersionNumber: Int? = nil
   ) {
+    self.spriteVersionNumber = spriteVersionNumber
     self.id = id?.trimmedNonEmpty
     self.displayName = displayName?.trimmedNonEmpty
     self.description = description?.trimmedNonEmpty
@@ -22,11 +25,13 @@ public struct CodexPetManifest: Decodable, Equatable {
     case id
     case displayName
     case description
+    case spriteVersionNumber
     case spritesheetPath
   }
 
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
+    self.spriteVersionNumber = try container.decodeIfPresent(Int.self, forKey: .spriteVersionNumber)
     self.id = try container.decodeIfPresent(String.self, forKey: .id)?.trimmedNonEmpty
     self.displayName = try container.decodeIfPresent(String.self, forKey: .displayName)?
       .trimmedNonEmpty

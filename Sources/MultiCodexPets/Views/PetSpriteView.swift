@@ -1,19 +1,38 @@
+import AVFoundation
 import AppKit
 import MultiCodexPetsCore
 
 final class PetSpriteView: NSView {
-  private let image: NSImage?
+  private let image: CGImage?
+  private var frameImages: [Int: NSImage] = [:]
+  private var clickSound: AVAudioPlayer?
+  var soundVolume: Float = 1 { didSet { clickSound?.volume = soundVolume } }
+  var isMuted = false { didSet { if isMuted { clickSound?.stop() } } }
+  var isInteractive = true
+  var positionLocked = false
+  var onDragEnded: ((NSRect) -> Void)?
+  var contextMenuProvider: (() -> NSMenu?)?
+  private var movedDuringPress = false
   private var frames: [AnimationFrame] = []
   private var frameIndex = 0
   private var frameTimer: Timer?
+  private var pointerTimer: Timer?
+  private var lookFrame: AnimationFrame?
   private var trackingAreaRef: NSTrackingArea?
   private var dragStartMouseLocation: NSPoint?
+  private var dragDirection: DragDirectionTracker?
   private var dragStartWindowOrigin: NSPoint?
   private var transientState: AnimationState?
   private var randomizesNextAnimationStart = false
 
   let pet: PetPackage
   private(set) var isDragging = false
+  var followsCursor = true {
+    didSet {
+      guard followsCursor != oldValue else { return }
+      updatePointerTracking()
+    }
+  }
 
   var animationState: AnimationState {
     didSet {
@@ -30,11 +49,7 @@ final class PetSpriteView: NSView {
   init(pet: PetPackage, animationState: AnimationState) {
     self.pet = pet
     self.animationState = animationState
-    if let spritesheetData = pet.spritesheetData {
-      self.image = NSImage(data: spritesheetData)
-    } else {
-      self.image = NSImage(contentsOf: pet.spritesheetURL)
-    }
+    self.image = PetImageDecoder.image(for: pet)
     super.init(frame: .zero)
     wantsLayer = true
     layer?.backgroundColor = NSColor.clear.cgColor
@@ -48,6 +63,11 @@ final class PetSpriteView: NSView {
 
   deinit {
     frameTimer?.invalidate()
+    pointerTimer?.invalidate()
+  }
+
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    isInteractive ? super.hitTest(point) : nil
   }
 
   override var acceptsFirstResponder: Bool {
@@ -58,6 +78,47 @@ final class PetSpriteView: NSView {
     true
   }
 
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    updatePointerTracking()
+  }
+
+  private func updatePointerTracking() {
+    pointerTimer?.invalidate()
+    pointerTimer = nil
+    updateLookFrame()
+    guard followsCursor, pet.spriteVersion == .v2, window != nil else { return }
+    let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+      self?.updateLookFrame()
+    }
+    RunLoop.main.add(timer, forMode: .common)
+    pointerTimer = timer
+  }
+
+  private func updateLookFrame() {
+    let nextFrame: AnimationFrame?
+    if followsCursor, pet.spriteVersion == .v2, animationState == .idle,
+      transientState == nil, !isDragging,
+      !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+      let window, window.isVisible
+    {
+      let center = window.convertPoint(
+        toScreen: convert(
+          NSPoint(x: bounds.midX, y: bounds.midY), to: nil
+        ))
+      nextFrame = pet.spriteVersion.lookFrame(
+        pointer: NSEvent.mouseLocation,
+        center: center,
+        deadzone: min(bounds.width, bounds.height) * 0.25
+      )
+    } else {
+      nextFrame = nil
+    }
+    guard lookFrame != nextFrame else { return }
+    lookFrame = nextFrame
+    needsDisplay = true
+  }
+
   override func updateTrackingAreas() {
     super.updateTrackingAreas()
 
@@ -65,6 +126,7 @@ final class PetSpriteView: NSView {
       removeTrackingArea(trackingAreaRef)
     }
 
+    guard isInteractive else { return }
     let trackingArea = NSTrackingArea(
       rect: bounds,
       options: [.activeAlways, .mouseEnteredAndExited, .inVisibleRect],
@@ -75,7 +137,7 @@ final class PetSpriteView: NSView {
   }
 
   override func mouseEntered(with event: NSEvent) {
-    guard transientState == nil else { return }
+    guard isInteractive, pet.spriteVersion == .v1, transientState == nil else { return }
     setTransientState(.jumping)
   }
 
@@ -86,40 +148,66 @@ final class PetSpriteView: NSView {
   }
 
   override func mouseDown(with event: NSEvent) {
+    movedDuringPress = false
     isDragging = true
-    dragStartMouseLocation = NSEvent.mouseLocation
+    updateLookFrame()
+    let location = NSEvent.mouseLocation
+    dragStartMouseLocation = location
+    dragDirection = DragDirectionTracker(startX: location.x)
     dragStartWindowOrigin = window?.frame.origin
   }
 
-  override func mouseDragged(with event: NSEvent) {
-    guard let window,
-      let dragStartMouseLocation,
-      let dragStartWindowOrigin
-    else {
-      return
-    }
+  override func menu(for event: NSEvent) -> NSMenu? { contextMenuProvider?() }
 
+  override func mouseDragged(with event: NSEvent) {
+    guard let dragStartMouseLocation else { return }
     let currentLocation = NSEvent.mouseLocation
     let deltaX = currentLocation.x - dragStartMouseLocation.x
     let deltaY = currentLocation.y - dragStartMouseLocation.y
+    if hypot(deltaX, deltaY) > 4 { movedDuringPress = true }
+    guard !positionLocked, let window, let dragStartWindowOrigin else { return }
     window.setFrameOrigin(
       NSPoint(
         x: dragStartWindowOrigin.x + deltaX,
         y: dragStartWindowOrigin.y + deltaY
       ))
 
-    if deltaX > 4 {
-      setTransientState(.runningRight)
-    } else if deltaX < -4 {
-      setTransientState(.runningLeft)
+    if let state = dragDirection?.update(x: currentLocation.x) {
+      setTransientState(state)
     }
   }
 
   override func mouseUp(with event: NSEvent) {
+    if isDragging, !movedDuringPress,
+      bounds.contains(convert(event.locationInWindow, from: nil))
+    {
+      playClickSound()
+    }
+    if movedDuringPress, let frame = window?.frame { onDragEnded?(frame) }
     isDragging = false
     dragStartMouseLocation = nil
+    dragDirection = nil
     dragStartWindowOrigin = nil
     setTransientState(nil)
+    updateLookFrame()
+  }
+
+  private func playClickSound() {
+    guard !isMuted else { return }
+    clickSound?.stop()
+    clickSound = nil
+    for url in PetSoundLibrary().soundURLs(forPetID: pet.id, role: .click).shuffled() {
+      do {
+        let player = try AVAudioPlayer(contentsOf: url)
+        player.volume = soundVolume
+        if player.play() {
+          clickSound = player
+          return
+        }
+      } catch {
+        NSLog("Could not play pet sound %@: %@", url.path, error.localizedDescription)
+      }
+    }
   }
 
   func setAnimationState(_ state: AnimationState, randomizeInitialFrame: Bool = false) {
@@ -143,18 +231,21 @@ final class PetSpriteView: NSView {
       return
     }
 
-    let frame = frames[min(frameIndex, frames.count - 1)]
-    let sourceRect = NSRect(
-      x: CGFloat(frame.columnIndex * PetAtlas.cellWidth),
-      y: CGFloat(PetAtlas.height - ((frame.rowIndex + 1) * PetAtlas.cellHeight)),
-      width: CGFloat(PetAtlas.cellWidth),
-      height: CGFloat(PetAtlas.cellHeight)
-    )
+    let frame = lookFrame ?? frames[min(frameIndex, frames.count - 1)]
+    let key = frame.rowIndex * PetAtlas.columns + frame.columnIndex
+    let cell: NSImage
+    if let cached = frameImages[key] {
+      cell = cached
+    } else {
+      guard let cropped = PetImageDecoder.cell(in: image, frame: frame) else { return }
+      cell = NSImage(cgImage: cropped, size: NSSize(width: PetAtlas.cellWidth, height: PetAtlas.cellHeight))
+      frameImages[key] = cell
+    }
 
-    NSGraphicsContext.current?.imageInterpolation = .none
-    image.draw(
+    NSGraphicsContext.current?.imageInterpolation = .high
+    cell.draw(
       in: bounds,
-      from: sourceRect,
+      from: NSRect(origin: .zero, size: cell.size),
       operation: .sourceOver,
       fraction: 1,
       respectFlipped: false,
@@ -164,12 +255,25 @@ final class PetSpriteView: NSView {
 
   private func setTransientState(_ state: AnimationState?) {
     guard transientState != state else { return }
+    let reversesRunning =
+      (transientState == .runningLeft && state == .runningRight)
+      || (transientState == .runningRight && state == .runningLeft)
     transientState = state
-    restartAnimation(for: state ?? animationState)
+    if reversesRunning, let state {
+      // Both running rows share timing; retain the current frame and its scheduled tick.
+      frames = AnimationTimeline.frames(
+        for: state,
+        reducedMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+      frameIndex = min(frameIndex, frames.count - 1)
+      needsDisplay = true
+    } else {
+      restartAnimation(for: state ?? animationState)
+    }
   }
 
   private func restartAnimation(for state: AnimationState, randomizeInitialFrame: Bool = false) {
     frameTimer?.invalidate()
+    updateLookFrame()
     frames = AnimationTimeline.frames(
       for: state,
       reducedMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion

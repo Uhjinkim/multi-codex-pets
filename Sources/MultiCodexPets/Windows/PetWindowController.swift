@@ -1,8 +1,13 @@
 import AppKit
 import MultiCodexPetsCore
 
-final class PetWindowController: NSWindowController {
+final class PetWindowController: NSWindowController, NSWindowDelegate {
+  private var nameLabelWindow: NSWindow?
+  private var nameLabel = PetNameLabel()
+  private var petName = ""
   private let petView: PetSpriteView
+  var onFrameChanged: ((NSRect) -> Void)?
+  var isPositionLocked: Bool { petView.positionLocked }
 
   var pet: PetPackage {
     petView.pet
@@ -40,6 +45,8 @@ final class PetWindowController: NSWindowController {
     window.contentView = petView
 
     super.init(window: window)
+    window.delegate = self
+    petView.onDragEnded = { [weak self] in self?.onFrameChanged?($0) }
     setScale(scale)
   }
 
@@ -57,10 +64,26 @@ final class PetWindowController: NSWindowController {
   func show() {
     showWindow(nil)
     window?.orderFrontRegardless()
+    updateNameLabel()
   }
 
   func setAnimationState(_ state: AnimationState, randomizeInitialFrame: Bool = false) {
     petView.setAnimationState(state, randomizeInitialFrame: randomizeInitialFrame)
+  }
+
+  func setInteraction(volume: Float, muted: Bool, locked: Bool) {
+    petView.soundVolume = volume
+    petView.isMuted = muted
+    petView.positionLocked = locked
+  }
+
+  func setSessionTooltip(_ text: String) { petView.toolTip = text }
+  func setContextMenuProvider(_ provider: @escaping () -> NSMenu?) {
+    petView.contextMenuProvider = provider
+  }
+
+  func setFollowsCursor(_ enabled: Bool) {
+    petView.followsCursor = enabled
   }
 
   func setScale(_ scale: Double) {
@@ -71,6 +94,72 @@ final class PetWindowController: NSWindowController {
     let newFrame = NSRect(origin: oldFrame.origin, size: newSize)
     window.setFrame(newFrame, display: true)
     petView.frame = NSRect(origin: .zero, size: newSize)
+    updateNameLabel()
+  }
+
+  func setNameLabel(_ name: String, style: PetNameLabel) {
+    petName = name
+    nameLabel = style
+    updateNameLabel()
+  }
+
+  func windowDidMove(_ notification: Notification) { positionNameLabel() }
+
+  private func positionNameLabel() {
+    guard let window, let label = nameLabelWindow, label.parent != nil else { return }
+    let screen = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
+    label.setFrame(nameLabel.frame(pet: window.frame, size: label.frame.size, screen: screen), display: true)
+  }
+
+  private func updateNameLabel() {
+    guard let window else { return }
+    guard nameLabel.position != .hidden, window.isVisible else {
+      if let label = nameLabelWindow {
+        window.removeChildWindow(label)
+        label.orderOut(nil)
+      }
+      return
+    }
+    let labelWindow: NSWindow
+    if let existing = nameLabelWindow {
+      labelWindow = existing
+    } else {
+      labelWindow = NSWindow(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: false)
+      labelWindow.isReleasedWhenClosed = false
+      labelWindow.isOpaque = false
+      labelWindow.backgroundColor = .clear
+      labelWindow.hasShadow = false
+      labelWindow.ignoresMouseEvents = true
+      labelWindow.collectionBehavior = window.collectionBehavior
+      nameLabelWindow = labelWindow
+    }
+    let text = NSTextField(labelWithString: petName)
+    text.font = .systemFont(ofSize: nameLabel.resolvedFontSize, weight: .medium)
+    text.textColor = nameLabel.color
+    text.lineBreakMode = .byTruncatingTail
+    text.alignment = .center
+    let size = NSSize(width: min(280, max(36, text.fittingSize.width + 16)),
+      height: text.fittingSize.height + 8)
+    let screen = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
+    let frame = nameLabel.frame(pet: window.frame, size: size, screen: screen)
+    labelWindow.setFrame(frame, display: true)
+    let content = NSView(frame: NSRect(origin: .zero, size: size))
+    content.wantsLayer = true
+    content.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.65).cgColor
+    content.layer?.cornerRadius = 6
+    text.frame = NSRect(x: 8, y: 4, width: size.width - 16, height: size.height - 8)
+    content.addSubview(text)
+    labelWindow.contentView = content
+    if labelWindow.parent == nil { window.addChildWindow(labelWindow, ordered: .above) }
+  }
+
+  override func close() {
+    if let label = nameLabelWindow {
+      window?.removeChildWindow(label)
+      label.close()
+      nameLabelWindow = nil
+    }
+    super.close()
   }
 
   func setFrameOrigin(_ origin: NSPoint) {

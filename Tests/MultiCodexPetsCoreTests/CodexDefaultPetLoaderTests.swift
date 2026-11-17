@@ -32,7 +32,8 @@ final class CodexDefaultPetLoaderTests: XCTestCase {
     try writeAsar(
       files: [
         "webview/assets/codex-spritesheet-v4-test.webp": validSpritesheet,
-        "webview/assets/rocky-spritesheet-v4-test.webp": validSpritesheet,
+        "webview/assets/rocky-spritesheet-v4-test.webp": TestImageData.webP(
+          width: 1_536, height: 2_288),
         "webview/assets/dewey-spritesheet-v4-test.webp": invalidSpritesheet,
         "webview/assets/unknown-spritesheet-v4-test.webp": validSpritesheet,
       ]
@@ -43,7 +44,8 @@ final class CodexDefaultPetLoaderTests: XCTestCase {
     XCTAssertEqual(packages.map(\.id), ["codex-default-codex", "codex-default-rocky"])
     XCTAssertEqual(packages.map(\.displayName), ["Codex", "Rocky"])
     XCTAssertEqual(packages.map(\.source), [.codexDefault, .codexDefault])
-    XCTAssertTrue(packages.allSatisfy { $0.spritesheetData == validSpritesheet })
+    XCTAssertEqual(packages.map(\.spriteVersion), [.v1, .v2])
+    XCTAssertEqual(packages.first?.spritesheetData, validSpritesheet)
   }
 
   func testReturnsEmptyWhenCodexAppAsarIsMissing() {

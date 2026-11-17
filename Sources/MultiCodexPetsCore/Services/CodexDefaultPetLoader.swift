@@ -37,8 +37,7 @@ public struct CodexDefaultPetLoader {
       archive.filePaths
       .compactMap { path -> CodexDefaultPetAsset? in
         guard let metadata = CodexDefaultPetAsset(path: path),
-          let spritesheetData = archive.readFile(path: path),
-          isValidPetSpritesheet(spritesheetData)
+          let spritesheetData = archive.readFile(path: path)
         else {
           return nil
         }
@@ -46,8 +45,12 @@ public struct CodexDefaultPetLoader {
         return metadata.withSpritesheetData(spritesheetData)
       }
       .sorted { $0.sortOrder < $1.sortOrder }
-      .map { asset in
-        PetPackage(
+      .compactMap { asset -> PetPackage? in
+        guard let dimensions = ImageDimensionsReader.read(data: asset.spritesheetData),
+          let spriteVersion = PetSpriteVersion(dimensions: dimensions)
+        else { return nil }
+
+        return PetPackage(
           id: "codex-default-\(asset.id)",
           folderName: asset.id,
           displayName: asset.displayName,
@@ -55,19 +58,12 @@ public struct CodexDefaultPetLoader {
           spritesheetURL: asarURL,
           spritesheetData: asset.spritesheetData,
           packageDirectory: codexAppURL,
-          source: .codexDefault
+          source: .codexDefault,
+          spriteVersion: spriteVersion
         )
       }
   }
 
-  private func isValidPetSpritesheet(_ data: Data) -> Bool {
-    guard let dimensions = ImageDimensionsReader.read(data: data) else {
-      return false
-    }
-
-    return dimensions.width == PetAtlas.width
-      && dimensions.height == PetAtlas.height
-  }
 }
 
 private struct CodexDefaultPetAsset {

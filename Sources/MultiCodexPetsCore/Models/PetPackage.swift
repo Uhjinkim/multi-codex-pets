@@ -13,6 +13,7 @@ public struct PetPackage: Equatable, Identifiable {
   public let spritesheetURL: URL
   public let spritesheetData: Data?
   public let packageDirectory: URL
+  public let spriteVersion: PetSpriteVersion
   public let source: PetSource
 
   public init(
@@ -23,7 +24,8 @@ public struct PetPackage: Equatable, Identifiable {
     spritesheetURL: URL,
     spritesheetData: Data? = nil,
     packageDirectory: URL,
-    source: PetSource = .custom
+    source: PetSource = .custom,
+    spriteVersion: PetSpriteVersion = .v1
   ) {
     self.id = id
     self.folderName = folderName
@@ -33,5 +35,6 @@ public struct PetPackage: Equatable, Identifiable {
     self.spritesheetData = spritesheetData
     self.packageDirectory = packageDirectory
     self.source = source
+    self.spriteVersion = spriteVersion
   }
 }

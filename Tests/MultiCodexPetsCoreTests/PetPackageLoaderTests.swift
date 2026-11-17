@@ -58,7 +58,24 @@ final class PetPackageLoaderTests: XCTestCase {
     XCTAssertTrue(packages.isEmpty)
   }
 
-  private func writePet(folderName: String, manifest: String) throws {
+  func testLoadsBothLayoutsAndValidatesDeclaredVersion() throws {
+    for (name, height, version) in [
+      ("v1", 1872, 1), ("v2", 2288, 2), ("inferred-v2", 2288, 0),
+      ("mismatch", 1872, 2), ("unknown", 2288, 3), ("invalid", 2080, 0),
+    ] {
+      let declaration = version == 0 ? "" : ", \"spriteVersionNumber\": \(version)"
+      try writePet(
+        folderName: name,
+        manifest: "{\"displayName\": \"\(name)\"\(declaration)}",
+        height: height
+      )
+    }
+    let packages = PetPackageLoader(codexHome: temporaryDirectory).loadPackages()
+    XCTAssertEqual(packages.map(\.id), ["inferred-v2", "v1", "v2"])
+    XCTAssertEqual(packages.map(\.spriteVersion), [.v2, .v1, .v2])
+  }
+
+  private func writePet(folderName: String, manifest: String, height: Int = 1_872) throws {
     let packageDirectory =
       temporaryDirectory
       .appendingPathComponent("pets", isDirectory: true)
@@ -72,7 +89,7 @@ final class PetPackageLoaderTests: XCTestCase {
       atomically: true,
       encoding: .utf8
     )
-    try TestImageData.webP(width: 1_536, height: 1_872)
+    try TestImageData.webP(width: 1_536, height: height)
       .write(to: packageDirectory.appendingPathComponent("spritesheet.webp"))
   }
 }
