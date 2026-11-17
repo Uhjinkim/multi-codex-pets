@@ -11,6 +11,30 @@ struct PetNameLabelSettingsView: View {
   private var scale: CGFloat { app.settingsLayout.scale }
 
   var body: some View {
+    VStack(spacing: 0) {
+      ViewThatFits(in: .vertical) {
+        controls
+        ScrollView { controls.fixedSize(horizontal: false, vertical: true) }
+      }
+      Divider()
+      HStack {
+        Text(localized("Changes apply immediately."))
+          .font(.system(size: 13 * scale)).foregroundStyle(.secondary)
+        Spacer()
+        Button(localized("Done")) { dismiss() }.keyboardShortcut(.defaultAction)
+      }
+      .padding(20 * scale)
+    }
+    .font(.system(size: 14 * scale)).controlSize(.large)
+    .frame(width: min(520, app.settingsLayout.contentSize.width - 60),
+      height: min(660, app.settingsLayout.contentSize.height - 60))
+    .onDisappear { NSColorPanel.shared.close() }
+    .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { notification in
+      if let panel = notification.object as? NSColorPanel, panel.isVisible { panel.close() }
+    }
+  }
+
+  private var controls: some View {
     VStack(alignment: .leading, spacing: 16) {
       Text(localizedFormat("Name Label for %@", app.displayName(for: pet)))
         .font(.system(size: 19 * scale, weight: .semibold)).lineLimit(2)
@@ -23,7 +47,8 @@ struct PetNameLabelSettingsView: View {
         }
         if style.position == .below { nameLabel }
       }
-      .frame(maxWidth: .infinity).frame(height: 220)
+      .frame(maxWidth: .infinity)
+      .frame(height: max(120, 87 * app.settings.scale + style.resolvedFontSize + 24))
       Picker(localized("Label Position"), selection: Binding(
         get: { style.position },
         set: { var value = style; value.position = $0; app.setPetNameLabel(pet.id, style: value) }
@@ -44,33 +69,36 @@ struct PetNameLabelSettingsView: View {
           .monospacedDigit().frame(width: 56, alignment: .trailing)
       }
       ColorPicker(localized("Text Color"), selection: Binding(
-        get: { Color(nsColor: style.color) },
-        set: { color in
-          guard let rgb = NSColor(color).usingColorSpace(.sRGB) else { return }
-          var value = style
-          value.colorHex = String(format: "%02X%02X%02X",
-            Int((rgb.redComponent * 255).rounded()), Int((rgb.greenComponent * 255).rounded()),
-            Int((rgb.blueComponent * 255).rounded()))
-          app.setPetNameLabel(pet.id, style: value)
-        }
+        get: { Color(nsColor: style.color) }, set: { setColor($0, background: false) }
       ), supportsOpacity: false)
-      Divider()
+      ColorPicker(localized("Background Color"), selection: Binding(
+        get: { Color(nsColor: style.backgroundColor.withAlphaComponent(1)) },
+        set: { setColor($0, background: true) }
+      ), supportsOpacity: false)
       HStack {
-        Text(localized("Changes apply immediately."))
-          .font(.system(size: 13 * scale)).foregroundStyle(.secondary)
-        Spacer()
-        Button(localized("Done")) { dismiss() }.keyboardShortcut(.defaultAction)
+        Text(localized("Background Transparency"))
+        Slider(value: Binding(
+          get: { 1 - style.resolvedBackgroundOpacity },
+          set: { var value = style; value.backgroundOpacity = 1 - $0; app.setPetNameLabel(pet.id, style: value) }
+        ), in: 0...1, step: 0.01)
+          .labelsHidden().accessibilityLabel(localized("Background Transparency"))
+        Text((1 - style.resolvedBackgroundOpacity).formatted(.percent.precision(.fractionLength(0))))
+          .monospacedDigit().frame(width: 56, alignment: .trailing)
       }
+      Text(localized("0% is opaque; 100% is fully transparent."))
+        .font(.system(size: 13 * scale)).foregroundStyle(.secondary)
     }
     .padding(20 * scale)
-    .font(.system(size: 14 * scale)).controlSize(.large)
-    .frame(width: min(520, app.settingsLayout.contentSize.width - 60))
-    .onDisappear { NSColorPanel.shared.close() }
-    .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { notification in
-      if let panel = notification.object as? NSColorPanel, panel.isVisible {
-        panel.close()
-      }
-    }
+  }
+
+  private func setColor(_ color: Color, background: Bool) {
+    guard let rgb = NSColor(color).usingColorSpace(.sRGB) else { return }
+    let components = [rgb.redComponent, rgb.greenComponent, rgb.blueComponent]
+      .map { Int((min(max($0, 0), 1) * 255).rounded()) }
+    let hex = String(format: "%02X%02X%02X", components[0], components[1], components[2])
+    var value = style
+    if background { value.backgroundColorHex = hex } else { value.colorHex = hex }
+    app.setPetNameLabel(pet.id, style: value)
   }
 
   private var nameLabel: some View {
@@ -79,7 +107,7 @@ struct PetNameLabelSettingsView: View {
       .foregroundStyle(Color(nsColor: style.color))
       .lineLimit(1).truncationMode(.tail)
       .padding(.horizontal, 8).padding(.vertical, 4)
-      .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 6))
+      .background(Color(nsColor: style.backgroundColor), in: RoundedRectangle(cornerRadius: 6))
       .frame(maxWidth: 280)
   }
 }

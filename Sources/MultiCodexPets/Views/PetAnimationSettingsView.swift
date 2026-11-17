@@ -12,50 +12,63 @@ struct PetAnimationSettingsView: View {
   private var scale: CGFloat { app.settingsLayout.scale }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 16 * scale) {
-      HStack {
-        Text(localizedFormat("Animations for %@", app.displayName(for: pet)))
-          .font(.system(size: 19 * scale, weight: .semibold))
-        Spacer()
-        if pet.spriteVersion == .v2 { Text("V2").foregroundStyle(.secondary) }
-      }
-      Text(localized("Select an animation to preview. Your desktop pet stays unchanged."))
-        .font(.system(size: 13 * scale)).foregroundStyle(.secondary)
-        .fixedSize(horizontal: false, vertical: true)
-      if pet.spriteVersion == .v2 {
-        Toggle(localized("Preview Cursor Tracking"), isOn: $previewsGaze)
-          .toggleStyle(.switch)
-          .font(.system(size: 14 * scale))
-      }
-      PetAnimationPreview(
-        pet: pet, animation: previewsGaze ? .idle : animation, followsCursor: previewsGaze
-      )
-        .frame(width: 144 * scale, height: 156 * scale)
-        .frame(maxWidth: .infinity)
-        .accessibilityLabel(localized(previewsGaze ? "Preview Cursor Tracking" : animation.displayName))
-      if previewsGaze {
-        Text(localized("Move the cursor around the preview to see all 16 look directions. Reduce Motion takes priority."))
-          .font(.system(size: 13 * scale)).foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-      }
-      LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 8 * scale) {
-        ForEach(MultiCodexPetsCore.AnimationState.allCases) { state in
-          Button {
-            previewsGaze = false
-            animation = state
-          } label: {
-            HStack(spacing: 6) {
-              Image(systemName: "checkmark")
-                .opacity(!previewsGaze && animation == state ? 1 : 0).accessibilityHidden(true)
-              Text(localized(state.displayName))
-            }
-            .frame(maxWidth: .infinity, minHeight: 32 * scale)
-            .contentShape(Rectangle())
+    VStack(spacing: 0) {
+      ScrollView {
+        VStack(alignment: .leading, spacing: 16 * scale) {
+          HStack {
+            Text(localizedFormat("Animations for %@", app.displayName(for: pet)))
+              .font(.system(size: 19 * scale, weight: .semibold))
+            Spacer()
+            if pet.spriteVersion == .v2 { Text("V2").foregroundStyle(.secondary) }
           }
-          .buttonStyle(.bordered)
-          .tint(!previewsGaze && animation == state ? .accentColor : nil)
-          .accessibilityAddTraits(!previewsGaze && animation == state ? .isSelected : [])
+          Text(localized("Select an animation to preview. Your desktop pet stays unchanged."))
+            .font(.system(size: 13 * scale)).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+          if pet.spriteVersion == .v2 {
+            Toggle(localized("Preview Cursor Tracking"), isOn: $previewsGaze)
+              .toggleStyle(.switch)
+              .font(.system(size: 14 * scale))
+          }
+          ReduceMotionSettingsLink()
+          PetAnimationPreview(
+            pet: pet, animation: previewsGaze ? .idle : animation, followsCursor: previewsGaze
+          )
+            .frame(width: 144 * scale, height: 156 * scale)
+            .frame(maxWidth: .infinity)
+            .accessibilityLabel(localized(previewsGaze ? "Preview Cursor Tracking" : animation.displayName))
+          if previewsGaze {
+            Text(localized("Move the cursor around the preview to see all 16 look directions. Reduce Motion takes priority."))
+              .font(.system(size: 13 * scale)).foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+          LazyVGrid(columns: [GridItem(.adaptive(minimum: 140 * scale), spacing: 8 * scale)], spacing: 8 * scale) {
+            ForEach(MultiCodexPetsCore.AnimationState.allCases) { state in
+              let selected = !previewsGaze && animation == state
+              Button {
+                previewsGaze = false
+                animation = state
+              } label: {
+                HStack(spacing: 6 * scale) {
+                  Text(localized(state.displayName))
+                    .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                  Image(systemName: "checkmark")
+                    .opacity(selected ? 1 : 0).accessibilityHidden(true)
+                }
+                .padding(.horizontal, 12 * scale)
+                .frame(maxWidth: .infinity, minHeight: 40 * scale)
+                .foregroundStyle(selected ? Color.white : Color.primary)
+                .background(selected ? Color.accentColor : Color(nsColor: .controlBackgroundColor),
+                  in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8)
+                  .strokeBorder(selected ? Color.clear : Color.primary.opacity(0.15)))
+                .contentShape(Rectangle())
+              }
+              .buttonStyle(.plain)
+              .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+          }
         }
+        .padding(20 * scale)
       }
       Divider()
       HStack {
@@ -64,11 +77,12 @@ struct PetAnimationSettingsView: View {
         Spacer()
         Button(localized("Done")) { dismiss() }.keyboardShortcut(.defaultAction)
       }
+      .padding(20 * scale)
     }
-    .padding(20 * scale)
     .font(.system(size: 14 * scale))
     .controlSize(.large)
-    .frame(width: min(600, app.settingsLayout.contentSize.width - 60))
+    .frame(width: min(600, app.settingsLayout.contentSize.width - 60),
+      height: min(720, app.settingsLayout.contentSize.height - 60))
   }
 }
 
@@ -80,13 +94,13 @@ private struct PetAnimationPreview: NSViewRepresentable {
   func makeNSView(context: Context) -> PetSpriteView {
     let view = PetSpriteView(pet: pet, animationState: animation)
     view.isInteractive = false
-    view.followsCursor = followsCursor
+    view.cursorTrackingMode = followsCursor ? .always : .off
     view.isMuted = true
     return view
   }
 
   func updateNSView(_ view: PetSpriteView, context: Context) {
-    view.followsCursor = followsCursor
+    view.cursorTrackingMode = followsCursor ? .always : .off
     view.setAnimationState(animation)
   }
 }

@@ -23,5 +23,9 @@ let package = Package(
       name: "MultiCodexPetsCoreTests",
       dependencies: ["MultiCodexPetsCore"]
     ),
+    .testTarget(
+      name: "MultiCodexPetsTests",
+      dependencies: ["MultiCodexPets"]
+    ),
   ]
 )

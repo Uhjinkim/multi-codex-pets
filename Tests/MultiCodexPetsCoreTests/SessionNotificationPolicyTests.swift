@@ -3,6 +3,18 @@ import XCTest
 @testable import MultiCodexPetsCore
 
 final class SessionNotificationPolicyTests: XCTestCase {
+  func testMessageAndCompletionCooldownsAreIndependent() {
+    var policy = SessionNotificationPolicy()
+    let now = Date(timeIntervalSince1970: 100)
+    XCTAssertTrue(policy.shouldNotify(petID: "cat", activity: .completed,
+      allowed: [.completed], cooldown: 5, now: now))
+    XCTAssertTrue(policy.shouldNotify(petID: "cat", notificationKey: OrcaMessageEvent.soundKey,
+      cooldown: 5, now: now))
+    XCTAssertFalse(policy.shouldNotify(petID: "cat", notificationKey: OrcaMessageEvent.soundKey,
+      cooldown: 5, now: now.addingTimeInterval(1)))
+    XCTAssertTrue(policy.shouldNotify(petID: "dog", notificationKey: OrcaMessageEvent.soundKey,
+      cooldown: 5, now: now.addingTimeInterval(1)))
+  }
   func testFiltersAndCooldownDoNotSuppressOtherImportantStatesOrPets() {
     var policy = SessionNotificationPolicy()
     let allowed: Set<AgentActivity> = [.completed, .approval, .failed]

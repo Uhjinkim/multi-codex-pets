@@ -7,6 +7,13 @@ public struct PetPreferences: Codable {
   public var muted = false
   public var customName: String?
   public var nameLabel: PetNameLabel?
+  public var cursorTrackingMode: PetCursorTrackingMode?
+  public var soundVolume: Float?
+
+  public var resolvedSoundVolume: Float {
+    guard let soundVolume, soundVolume.isFinite else { return 1 }
+    return min(max(soundVolume, 0), 1)
+  }
 
   public init() {}
 
@@ -19,6 +26,12 @@ public struct PetPreferences: Codable {
   public func displayName(fallback: String) -> String {
     customName ?? fallback
   }
+}
+
+public enum PetCursorTrackingMode: String, Codable, CaseIterable {
+  case off = "Off"
+  case always = "Always"
+  case whenShaken = "When Shaken"
 }
 
 public enum PetPlacement {

@@ -32,7 +32,7 @@ public struct PetPackageLoader {
     )
   }
 
-  public func loadPackages() -> [PetPackage] {
+  public func loadPackages(excludingIDs: Set<String> = []) -> [PetPackage] {
     do {
       try ensurePetsDirectoryExists()
       let packageDirectories = try fileManager.contentsOfDirectory(
@@ -43,6 +43,7 @@ public struct PetPackageLoader {
 
       return
         packageDirectories
+        .filter { !excludingIDs.contains($0.lastPathComponent) }
         .filter { $0.isDirectory(fileManager: fileManager) }
         .compactMap(loadPackage(directory:))
         .sorted {

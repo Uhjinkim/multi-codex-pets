@@ -42,6 +42,15 @@ final class PetPackageLoaderTests: XCTestCase {
     XCTAssertEqual(packages[0].source, .custom)
   }
 
+  func testExcludesIDsAlreadyUsedByBuiltInPets() throws {
+    for name in ["alpha", "codex-default-rocky"] {
+      try writePet(folderName: name, manifest: "{}")
+    }
+    let loader = PetPackageLoader(codexHome: temporaryDirectory)
+    XCTAssertEqual(loader.loadPackages().count, 2)
+    XCTAssertEqual(loader.loadPackages(excludingIDs: ["codex-default-rocky"]).map(\.id), ["alpha"])
+  }
+
   func testRejectsSpritesheetPathOutsidePackageDirectory() throws {
     try writePet(
       folderName: "escape",

@@ -65,9 +65,19 @@ final class AppSettings {
     set { defaults.set(min(max(newValue, 0), 60), forKey: "notificationCooldown") }
   }
 
+  var orcaMessageNotifications: Bool {
+    get { defaults.object(forKey: "orcaMessageNotifications") as? Bool ?? true }
+    set { defaults.set(newValue, forKey: "orcaMessageNotifications") }
+  }
+
   var clickVolume: Float {
     get { defaults.object(forKey: "clickVolume") as? Float ?? 1 }
     set { defaults.set(min(max(newValue, 0), 1), forKey: "clickVolume") }
+  }
+
+  var soundsMuted: Bool {
+    get { defaults.bool(forKey: "soundsMuted") }
+    set { defaults.set(newValue, forKey: "soundsMuted") }
   }
 
   var alertVolume: Float {

@@ -36,7 +36,7 @@ public struct PetSoundLibrary {
   }
 
   public func soundURLs(
-    forPetID id: String, role: PetSoundRole? = nil, activity: AgentActivity? = nil
+    forPetID id: String, role: PetSoundRole? = nil, activity: AgentActivity? = nil, notificationKey: String? = nil
   ) -> [URL] {
     guard let folder = directory(forPetID: id),
       let files = try? FileManager.default.contentsOfDirectory(
@@ -60,7 +60,7 @@ public struct PetSoundLibrary {
       case .click: return !roles.excludedFromClick.contains($0.lastPathComponent)
       case .notification:
         let names =
-          activity.flatMap { roles.notificationsByActivity[$0.rawValue] } ?? roles.notifications
+          (notificationKey ?? activity?.rawValue).flatMap { roles.notificationsByActivity[$0] } ?? roles.notifications
         return names.contains($0.lastPathComponent)
       }
     }
@@ -68,7 +68,7 @@ public struct PetSoundLibrary {
 
   public func setUsage(
     _ enabled: Bool, filename: String, forPetID id: String, role: PetSoundRole,
-    activity: AgentActivity? = nil
+    activity: AgentActivity? = nil, notificationKey: String? = nil
   )
     throws
   {
@@ -81,11 +81,11 @@ public struct PetSoundLibrary {
       roles.excludedFromClick.removeAll { $0 == filename }
       if !enabled { roles.excludedFromClick.append(filename) }
     case .notification:
-      if let activity {
-        var names = roles.notificationsByActivity[activity.rawValue] ?? roles.notifications
+      if let key = notificationKey ?? activity?.rawValue {
+        var names = roles.notificationsByActivity[key] ?? roles.notifications
         names.removeAll { $0 == filename }
         if enabled { names.append(filename) }
-        roles.notificationsByActivity[activity.rawValue] = names
+        roles.notificationsByActivity[key] = names
       } else {
         roles.notifications.removeAll { $0 == filename }
         if enabled { roles.notifications.append(filename) }
@@ -94,10 +94,12 @@ public struct PetSoundLibrary {
     try saveRoles(roles, folder: folder)
   }
 
-  public func useDefaultNotificationPool(forPetID id: String, activity: AgentActivity) throws {
+  public func useDefaultNotificationPool(forPetID id: String, activity: AgentActivity? = nil,
+    notificationKey: String? = nil) throws {
     guard let folder = directory(forPetID: id) else { throw CocoaError(.fileWriteInvalidFileName) }
     var roles = try loadRoles(folder)
-    roles.notificationsByActivity.removeValue(forKey: activity.rawValue)
+    guard let key = notificationKey ?? activity?.rawValue else { return }
+    roles.notificationsByActivity.removeValue(forKey: key)
     try saveRoles(roles, folder: folder)
   }
 
@@ -115,7 +117,7 @@ public struct PetSoundLibrary {
   @discardableResult
   public func importSound(
     from source: URL, forPetID id: String, role: PetSoundRole = .click,
-    activity: AgentActivity? = nil
+    activity: AgentActivity? = nil, notificationKey: String? = nil
   ) throws
     -> URL
   {
@@ -147,11 +149,11 @@ public struct PetSoundLibrary {
       roles.excludedFromClick.removeAll { $0 == name }
       if role == .notification {
         roles.excludedFromClick.append(name)
-        if let activity {
-          var names = roles.notificationsByActivity[activity.rawValue] ?? roles.notifications
+        if let key = notificationKey ?? activity?.rawValue {
+          var names = roles.notificationsByActivity[key] ?? roles.notifications
           names.removeAll { $0 == name }
           names.append(name)
-          roles.notificationsByActivity[activity.rawValue] = names
+          roles.notificationsByActivity[key] = names
         } else {
           roles.notifications.removeAll { $0 == name }
           roles.notifications.append(name)

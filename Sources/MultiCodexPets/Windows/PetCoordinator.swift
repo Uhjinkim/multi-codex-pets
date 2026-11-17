@@ -12,16 +12,20 @@ final class PetCoordinator {
   private var followsCursor = true
   private var preferences: [String: PetPreferences] = [:]
   private var clickVolume: Float = 1
+  private var soundsMuted = false
   var onPreferencesChanged: ((String, PetPreferences) -> Void)?
   var onContextMenu: ((String) -> NSMenu?)?
 
-  func configure(preferences: [String: PetPreferences], clickVolume: Float) {
+  func configure(preferences: [String: PetPreferences], clickVolume: Float, muted: Bool = false) {
     self.preferences = preferences
     self.clickVolume = clickVolume
+    soundsMuted = muted
     for (id, controller) in windowControllersByPetID {
       let preference = preferences[id] ?? PetPreferences()
       controller.setInteraction(
-        volume: clickVolume, muted: preference.muted, locked: preference.positionLocked)
+        volume: clickVolume * preference.resolvedSoundVolume,
+        muted: soundsMuted || preference.muted, locked: preference.positionLocked)
+      controller.setCursorTrackingMode(preference.cursorTrackingMode ?? (followsCursor ? .always : .off))
       controller.setNameLabel(preference.displayName(fallback: controller.pet.displayName),
         style: preference.nameLabel ?? PetNameLabel())
     }
@@ -106,7 +110,7 @@ final class PetCoordinator {
       let controller =
         existingController(for: package)
         ?? makeController(for: package, index: index, state: state, scale: scale)
-      controller.setFollowsCursor(followsCursor)
+      controller.setCursorTrackingMode(preferences[package.id]?.cursorTrackingMode ?? (followsCursor ? .always : .off))
       controller.setScale(scale)
       let now = Date()
       let motion = walkingMotion(
@@ -152,7 +156,9 @@ final class PetCoordinator {
 
   func setFollowsCursor(_ enabled: Bool) {
     followsCursor = enabled
-    for controller in visibleControllers { controller.setFollowsCursor(enabled) }
+    for controller in visibleControllers {
+      controller.setCursorTrackingMode(preferences[controller.pet.id]?.cursorTrackingMode ?? (enabled ? .always : .off))
+    }
   }
 
   func setScale(_ scale: Double) {
@@ -217,7 +223,8 @@ final class PetCoordinator {
     )
     let preference = preferences[package.id] ?? PetPreferences()
     controller.setInteraction(
-      volume: clickVolume, muted: preference.muted, locked: preference.positionLocked)
+      volume: clickVolume * preference.resolvedSoundVolume,
+      muted: soundsMuted || preference.muted, locked: preference.positionLocked)
     controller.setNameLabel(preference.displayName(fallback: package.displayName),
       style: preference.nameLabel ?? PetNameLabel())
     controller.onFrameChanged = { [weak self] frame in self?.remember(package.id, frame: frame) }

@@ -45,6 +45,25 @@ final class PetPreferencesTests: XCTestCase {
     XCTAssertEqual(restored.displayName(fallback: "Original"), "Original")
     XCTAssertEqual(restored.screenID, 42)
     XCTAssertTrue(restored.positionLocked)
+    XCTAssertNil(restored.cursorTrackingMode)
+    XCTAssertEqual(restored.resolvedSoundVolume, 1)
+  }
+
+  func testCursorTrackingModesPersistIndependentlyForEachPet() throws {
+    var first = PetPreferences()
+    first.cursorTrackingMode = .whenShaken
+    first.muted = true
+    first.soundVolume = 0.4
+    var second = PetPreferences()
+    second.cursorTrackingMode = .off
+    let data = try JSONEncoder().encode(["first": first, "second": second])
+    let restored = try JSONDecoder().decode([String: PetPreferences].self, from: data)
+    XCTAssertEqual(restored["first"]?.cursorTrackingMode, .whenShaken)
+    XCTAssertEqual(restored["second"]?.cursorTrackingMode, .off)
+    XCTAssertEqual(restored["first"]?.muted, true)
+    XCTAssertEqual(restored["second"]?.muted, false)
+    XCTAssertEqual(restored["first"]?.resolvedSoundVolume, 0.4)
+    XCTAssertEqual(restored["second"]?.resolvedSoundVolume, 1)
   }
 
   func testConversationAssignmentsRoundTripWithoutRebindingMissingConversations() throws {

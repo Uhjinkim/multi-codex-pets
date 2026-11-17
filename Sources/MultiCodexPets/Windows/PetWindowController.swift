@@ -62,7 +62,6 @@ final class PetWindowController: NSWindowController, NSWindowDelegate {
   }
 
   func show() {
-    showWindow(nil)
     window?.orderFrontRegardless()
     updateNameLabel()
   }
@@ -82,8 +81,8 @@ final class PetWindowController: NSWindowController, NSWindowDelegate {
     petView.contextMenuProvider = provider
   }
 
-  func setFollowsCursor(_ enabled: Bool) {
-    petView.followsCursor = enabled
+  func setCursorTrackingMode(_ mode: PetCursorTrackingMode) {
+    petView.cursorTrackingMode = mode
   }
 
   func setScale(_ scale: Double) {
@@ -98,6 +97,7 @@ final class PetWindowController: NSWindowController, NSWindowDelegate {
   }
 
   func setNameLabel(_ name: String, style: PetNameLabel) {
+    guard petName != name || nameLabel != style else { return }
     petName = name
     nameLabel = style
     updateNameLabel()
@@ -145,7 +145,7 @@ final class PetWindowController: NSWindowController, NSWindowDelegate {
     labelWindow.setFrame(frame, display: true)
     let content = NSView(frame: NSRect(origin: .zero, size: size))
     content.wantsLayer = true
-    content.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.65).cgColor
+    content.layer?.backgroundColor = nameLabel.backgroundColor.cgColor
     content.layer?.cornerRadius = 6
     text.frame = NSRect(x: 8, y: 4, width: size.width - 16, height: size.height - 8)
     content.addSubview(text)

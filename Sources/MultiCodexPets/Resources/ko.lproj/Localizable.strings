@@ -85,7 +85,7 @@
 "Click: %d · Alerts: %d" = "클릭 %d개 · 알림 %d개";
 "Set click and notification sounds for each pet. Multiple selected sounds play randomly." = "펫마다 클릭용·알림용 소리를 설정하세요. 여러 파일을 선택하면 랜덤으로 재생합니다.";
 "Session sound notifications" = "세션 상태 변경 소리 알림";
-"Assigned visible pets notify when their session activity changes. Choose alert sounds in Pets." = "표시 중인 펫에 배정된 세션의 상태가 바뀌면 알립니다. 펫 탭에서 알림용 소리를 지정하세요.";
+"Assigned visible pets notify in session and walking modes. Choose alert sounds in Pets." = "세션·산책 모드에서 표시 중인 펫에 배정된 세션의 상태가 바뀌면 알립니다. 펫 탭에서 알림용 소리를 지정하세요.";
 "Sounds for %@" = "%@ 소리 설정";
 "Choose click and alert roles for each file. Multiple selected sounds play randomly." = "파일마다 클릭용·알림용을 선택하세요. 같은 용도에 여러 파일을 선택하면 랜덤으로 재생합니다.";
 "Add Click Sounds…" = "클릭 소리 추가…";
@@ -174,3 +174,38 @@
 "Text Color" = "글자 색상";
 "%d pt" = "%d pt";
 "Session" = "세션";
+"Background Color" = "배경 색상";
+"Background Transparency" = "배경 투명도";
+"0% is opaque; 100% is fully transparent." = "0%는 불투명, 100%는 완전 투명입니다.";
+
+"Cursor Tracking" = "커서 바라보기";
+"Off" = "끄기";
+"Always" = "항상";
+"When Shaken" = "흔들 때만";
+"Default cursor tracking for V2 pets" = "V2 펫의 기본 커서 바라보기";
+"Applies to pets without a cursor tracking override. Change each V2 pet in its options menu." = "개별 설정이 없는 펫에 적용됩니다. V2 펫마다 옵션 메뉴에서 따로 바꿀 수 있습니다.";
+"Reduce Motion is on" = "동작 줄이기: 켜짐";
+"Reduce Motion is off" = "동작 줄이기: 꺼짐";
+"Open Motion Accessibility Settings…" = "동작 줄이기 설정 열기…";
+
+"Pet Volume" = "이 펫의 음량";
+"Global Volume — All Pets" = "전체 펫 공통 음량";
+"Mute All Pets" = "모든 펫 음소거";
+"All pet sounds are muted. Unmute in Global Volume to hear this pet." = "모든 펫이 음소거되어 있습니다. 전체 펫 공통 음량에서 음소거를 해제하세요.";
+
+"Character name or alias" = "캐릭터 이름이나 별칭";
+"Find on Myinstants…" = "Myinstants에서 찾기…";
+"Find on Codex Pets…" = "Codex Pets에서 찾기…";
+"Preview and download in your browser, then add the file as a click or alert sound below." = "브라우저에서 미리 듣고 내려받은 다음, 아래에서 클릭용 또는 알림용 소리로 추가하세요.";
+"Install a pet from the website, then use Refresh Pets to load it here." = "사이트에서 펫을 설치한 다음 ‘펫 새로고침’을 눌러 여기에 반영하세요.";
+"Opens macOS accessibility settings. Reduce Motion affects all apps." = "macOS 손쉬운 사용 설정을 엽니다. 동작 줄이기는 모든 앱에 적용됩니다.";
+
+"Orca message sent" = "Orca 메시지 전달";
+"Notify the sender’s pet for new Orca messages, separately from completion. Choose its sounds in Pets → Sounds → Alert pool." = "새 Orca 메시지는 발신 세션의 펫에 완료와 별도로 알립니다. 펫 → 소리 → 알림 소리 적용 상태에서 전달용 소리를 고르세요.";
+"Orca message detected: %@ · %@" = "Orca 전달 감지: %@ · %@";
+"Orca message history is unavailable. Message alerts will resume from a fresh baseline." = "Orca 메시지 기록을 읽을 수 없습니다. 복구 후 새 기준점부터 전달 알림을 다시 시작합니다.";
+
+"Preview animations" = "동작 미리보기";
+"Sound settings" = "소리 설정";
+"Sound settings for %@" = "%@ 소리 설정";
+"Looks while idle, waiting for input, or completed. Generating, review, failure, dragging, and Reduce Motion take priority." = "기본 대기·입력 대기·완료 상태에서 바라봅니다. 생성·검토·실패·드래그와 동작 줄이기가 우선합니다.";

@@ -7,7 +7,7 @@ import UniformTypeIdentifiers
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAudioPlayerDelegate,
   ObservableObject
 {
-  let settings = AppSettings()
+  let settings: AppSettings
   @Published private(set) var settingsRevision = 0
   @Published private(set) var settingsLayout = SettingsWindowLayout(
     visibleSize: CGSize(width: 1440, height: 900))
@@ -21,14 +21,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
   private var sessionChanges = SessionStateChangeTracker()
   private let soundNotifier = SessionSoundNotifier()
   private var notificationPolicy = SessionNotificationPolicy()
+  private var previousOrcaAssignments: [String: String] = [:]
   private var previewPlayer: AVAudioPlayer?
   private var previewRole = PetSoundRole.click
+  private var previewPetID: String?
   @Published private(set) var previewingSound: URL?
   @Published private(set) var lastSessionCheck: Date?
   @Published private(set) var lastSuccessfulSessionCheck: Date?
   @Published private(set) var sessionDiagnostics: [String] = []
+  @Published private(set) var lastOrcaMessageAt: Date?
+  @Published private(set) var lastOrcaMessageSender: String?
   @Published var requestedSettingsPetID: String?
-  @Published var requestedNameLabelPetID: String?
+  @Published var requestedPetSheet: PetSettingsSheet?
+  @Published var requestedRenamePetID: String?
   private(set) var detectedSessions: [DetectedAgentSession] = []
   private(set) var unlinkedProcesses: [DetectedAgentSession] = []
   private(set) var sessionRouting = SessionRouting() {
@@ -40,22 +45,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
   private(set) var petPackages: [PetPackage] = []
   private var previewImages: [String: NSImage] = [:]
 
-  override init() {
+  init(settings: AppSettings = AppSettings()) {
+    self.settings = settings
     super.init()
     sessionRouting = settings.savedRouting
     soundNotifier.volume = settings.alertVolume
     petCoordinator.configure(
-      preferences: settings.petPreferences, clickVolume: settings.clickVolume)
+      preferences: settings.petPreferences, clickVolume: settings.clickVolume, muted: settings.soundsMuted)
     petCoordinator.onPreferencesChanged = { [weak self] id, preference in
       guard let self else { return }
       var values = self.settings.petPreferences
       values[id] = preference
       self.settings.petPreferences = values
     }
-    petCoordinator.onContextMenu = { [weak self] in self?.petContextMenu($0) }
+    petCoordinator.onContextMenu = { [weak self] id in
+      guard let self, let pet = self.petPackages.first(where: { $0.id == id }) else { return nil }
+      return self.petContextMenu(pet)
+    }
   }
 
   func applicationWillTerminate(_ notification: Notification) {
+    sessionMonitor.stop()
     petCoordinator.hidePets()
     soundNotifier.stop()
     stopSoundPreview()
@@ -68,6 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
     sessionMonitor.onDiagnostics = { [weak self] values in
       if self?.sessionDiagnostics != values { self?.sessionDiagnostics = values }
     }
+    sessionMonitor.onOrcaMessages = { [weak self] events in self?.handleOrcaMessages(events) }
     sessionMonitor.onUpdate = { [weak self] sessions in
       guard let self else { return }
       let next = (sessions ?? []).filter(\.hasConversationIdentity)
@@ -119,6 +130,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
     let toggleTitle = petCoordinator.isShowingPets ? "Hide Pets" : "Show Pets"
     menu.addItem(actionItem(title: localized(toggleTitle), action: #selector(togglePets)))
 
+    let sessionAlerts = actionItem(
+      title: localized("Session sound notifications"), action: #selector(toggleSessionSoundNotifications))
+    sessionAlerts.state = settings.sessionSoundNotifications ? .on : .off
+    menu.addItem(sessionAlerts)
+
     let modes = NSMenu()
     for mode in PetBehaviorMode.allCases {
       let item = actionItem(
@@ -151,10 +167,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
     petCoordinator.setWalksAround(settings.walksAround, baseState: settings.animationState)
     if settings.followsSessions {
       sessionMonitor.start()
-      applySessionAnimations()
     } else {
       petCoordinator.setAnimationState(settings.animationState)
     }
+    applySessionAnimations()
     rebuildMenu()
   }
 
@@ -206,11 +222,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
     window.setFrame(frame, display: true)
   }
 
+  func windowWillClose(_ notification: Notification) {
+    guard let window = notification.object as? NSWindow, window === settingsWindow?.window else { return }
+    requestedSettingsPetID = nil
+    requestedPetSheet = nil
+    requestedRenamePetID = nil
+  }
+
+  func requestSessionChange(_ id: String) {
+    requestedSettingsPetID = id
+    openSettings()
+  }
+
+  func showPetSettings(_ pet: PetPackage, kind: PetSettingsSheet.Kind) {
+    openSettings()
+    requestedPetSheet = PetSettingsSheet(pet: pet, kind: kind)
+  }
+
+  func requestPetRename(_ id: String) {
+    openSettings()
+    requestedRenamePetID = id
+  }
+
   private func activateSessionSettings() {
     resetSessionNotifications()
-    settings.followsSessions = true
-    settings.walksAround = false
-    petCoordinator.setWalksAround(false, baseState: settings.animationState)
+    settings.followsSessions = !settings.walksAround
+    if !settings.walksAround {
+      petCoordinator.setWalksAround(false, baseState: settings.animationState)
+    }
     sessionMonitor.start()
     applySessionAnimations()
     rebuildMenu()
@@ -251,7 +290,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
     preference.setCustomName(name)
     values[id] = preference
     settings.petPreferences = values
-    petCoordinator.configure(preferences: values, clickVolume: settings.clickVolume)
+    petCoordinator.configure(preferences: values, clickVolume: settings.clickVolume, muted: settings.soundsMuted)
     applySessionAnimations()
     rebuildMenu()
   }
@@ -262,7 +301,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
     preference.nameLabel = style
     values[id] = preference
     settings.petPreferences = values
-    petCoordinator.configure(preferences: values, clickVolume: settings.clickVolume)
+    petCoordinator.configure(preferences: values, clickVolume: settings.clickVolume, muted: settings.soundsMuted)
     rebuildMenu()
   }
 
@@ -306,10 +345,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
   }
 
   private func refreshPets() {
-    petPackages = defaultPetLoader.loadPackages() + petLoader.loadPackages()
+    let defaults = defaultPetLoader.loadPackages()
+    petPackages = defaults + petLoader.loadPackages(excludingIDs: Set(defaults.map(\.id)))
     previewImages.removeAll()
     updateSelectedPetsAfterPackageRefresh()
     if petCoordinator.isShowingPets {
+      petCoordinator.hidePets()
       showConfiguredPets()
     } else {
       rebuildMenu()
@@ -336,6 +377,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
     sessionChanges.reset()
     notificationPolicy.reset()
     soundNotifier.stop()
+    previousOrcaAssignments.removeAll()
+    sessionMonitor.resetOrcaMessageBaseline()
   }
 
   private func applySessionAnimations() {
@@ -346,7 +389,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
       petCoordinator.setSessionAnimations(assigned.map { animations.animation(for: $0?.activity) })
     }
     let enabled =
-      settings.followsSessions && settings.sessionSoundNotifications
+      (settings.followsSessions || settings.walksAround) && settings.sessionSoundNotifications
+      && !settings.soundsMuted && petCoordinator.isShowingPets && !sessionDetectionFailed
+    sessionMonitor.observesOrcaMessages = settings.orcaMessageNotifications
+      && (settings.followsSessions || settings.walksAround)
       && petCoordinator.isShowingPets && !sessionDetectionFailed
     var assignments: [String: DetectedAgentSession] = [:]
     for (petID, session) in zip(petIDs, assigned) { assignments[petID] = session }
@@ -361,7 +407,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
       else { continue }
       soundNotifier.enqueue(
         petID: petID,
-        sounds: library.soundURLs(forPetID: petID, role: .notification, activity: session.activity))
+        sounds: library.soundURLs(forPetID: petID, role: .notification, activity: session.activity),
+        petVolume: settings.petPreferences[petID]?.resolvedSoundVolume ?? 1)
     }
     var tooltips = Dictionary(uniqueKeysWithValues: selectedPetPackages.map { ($0.id, displayName(for: $0)) })
     for (id, session) in assignments {
@@ -371,9 +418,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
     petCoordinator.setSessionTooltips(tooltips)
   }
 
+  private func handleOrcaMessages(_ events: [OrcaMessageEvent]) {
+    let pets = selectedPetPackages.map(\.id)
+    let sessions = sessionRouting.resolvedSessions(for: pets, sessions: detectedSessions)
+    let assignments = Dictionary(uniqueKeysWithValues: zip(pets, sessions).compactMap { id, session in
+      session.map { (id, $0.id) }
+    })
+    defer { previousOrcaAssignments = assignments }
+    guard settings.orcaMessageNotifications else { return }
+    if let event = events.last,
+      let sender = detectedSessions.first(where: { $0.id == event.senderSessionID }) {
+      lastOrcaMessageSender = sender.title ?? localized("Untitled session")
+      lastOrcaMessageAt = Date()
+    }
+    guard (settings.followsSessions || settings.walksAround), settings.sessionSoundNotifications,
+      !settings.soundsMuted, petCoordinator.isShowingPets, !sessionDetectionFailed else { return }
+    let senders = Set(events.map(\.senderSessionID))
+    let library = PetSoundLibrary(codexHome: petLoader.codexHome)
+    for petID in pets {
+      guard let sessionID = assignments[petID], senders.contains(sessionID),
+        previousOrcaAssignments[petID] == sessionID,
+        settings.petPreferences[petID]?.muted != true,
+        notificationPolicy.shouldNotify(petID: petID, notificationKey: OrcaMessageEvent.soundKey,
+          cooldown: settings.notificationCooldown) else { continue }
+      soundNotifier.enqueue(petID: petID,
+        sounds: library.soundURLs(forPetID: petID, role: .notification,
+          notificationKey: OrcaMessageEvent.soundKey),
+        petVolume: settings.petPreferences[petID]?.resolvedSoundVolume ?? 1,
+        notificationKey: OrcaMessageEvent.soundKey)
+    }
+  }
+
+  func setOrcaMessageNotifications(_ enabled: Bool) {
+    settings.orcaMessageNotifications = enabled
+    resetSessionNotifications()
+    applySessionAnimations()
+    rebuildMenu()
+  }
+
+  @objc private func toggleSessionSoundNotifications() {
+    setSessionSoundNotifications(!settings.sessionSoundNotifications)
+  }
+
   func setSessionSoundNotifications(_ enabled: Bool) {
     settings.sessionSoundNotifications = enabled
     resetSessionNotifications()
+    applySessionAnimations()
     rebuildMenu()
   }
 
@@ -436,19 +526,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
     rebuildMenu()
   }
 
-  func sounds(for id: String, role: PetSoundRole? = nil, activity: AgentActivity? = nil) -> [URL] {
+  func sounds(for id: String, role: PetSoundRole? = nil, activity: AgentActivity? = nil, notificationKey: String? = nil) -> [URL] {
     PetSoundLibrary(codexHome: petLoader.codexHome).soundURLs(
-      forPetID: id, role: role, activity: activity)
+      forPetID: id, role: role, activity: activity, notificationKey: notificationKey)
   }
 
   func setSoundUsage(
     _ enabled: Bool, filename: String, petID: String, role: PetSoundRole,
-    activity: AgentActivity? = nil
+    activity: AgentActivity? = nil, notificationKey: String? = nil
   ) {
     do {
       try PetSoundLibrary(codexHome: petLoader.codexHome).setUsage(
         enabled, filename: filename,
-        forPetID: petID, role: role, activity: activity)
+        forPetID: petID, role: role, activity: activity, notificationKey: notificationKey)
       if role == .notification { soundNotifier.stop() }
       rebuildMenu()
     } catch {
@@ -458,7 +548,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
     }
   }
 
-  func chooseSoundFile(for id: String, role: PetSoundRole = .click, activity: AgentActivity? = nil)
+  func chooseSoundFile(for id: String, role: PetSoundRole = .click, activity: AgentActivity? = nil, notificationKey: String? = nil)
   {
     guard let root = settingsWindow?.window else { return }
     let window = root.attachedSheet ?? root
@@ -480,7 +570,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
         for url in panel.urls { _ = try AVAudioPlayer(contentsOf: url) }
         let library = PetSoundLibrary(codexHome: self.petLoader.codexHome)
         for url in panel.urls {
-          try library.importSound(from: url, forPetID: id, role: role, activity: activity)
+          try library.importSound(from: url, forPetID: id, role: role, activity: activity, notificationKey: notificationKey)
         }
       } catch {
         NSAlert(error: error).beginSheetModal(for: window)
@@ -488,10 +578,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
     }
   }
 
-  func useDefaultAlertPool(petID: String, activity: AgentActivity) {
+  func useDefaultAlertPool(petID: String, activity: AgentActivity? = nil, notificationKey: String? = nil) {
     do {
       try PetSoundLibrary(codexHome: petLoader.codexHome).useDefaultNotificationPool(
-        forPetID: petID, activity: activity)
+        forPetID: petID, activity: activity, notificationKey: notificationKey)
       rebuildMenu()
     } catch { NSSound.beep() }
   }
@@ -514,12 +604,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
     if role == .click { settings.clickVolume = value } else { settings.alertVolume = value }
     soundNotifier.volume = settings.alertVolume
     petCoordinator.configure(
-      preferences: settings.petPreferences, clickVolume: settings.clickVolume)
-    if previewRole == role { previewPlayer?.volume = value }
+      preferences: settings.petPreferences, clickVolume: settings.clickVolume, muted: settings.soundsMuted)
+    if previewRole == role, let previewPetID {
+      previewPlayer?.volume = soundVolume(for: previewPetID, role: role)
+    }
     rebuildMenu()
   }
 
-  func previewSound(_ url: URL, role: PetSoundRole) {
+
+  func setSoundsMuted(_ enabled: Bool) {
+    settings.soundsMuted = enabled
+    if enabled { stopSoundPreview() }
+    resetSessionNotifications()
+    petCoordinator.configure(preferences: settings.petPreferences,
+      clickVolume: settings.clickVolume, muted: enabled)
+    applySessionAnimations()
+    rebuildMenu()
+  }
+
+  func soundVolume(for petID: String, role: PetSoundRole) -> Float {
+    let preference = settings.petPreferences[petID] ?? PetPreferences()
+    guard !settings.soundsMuted, !preference.muted else { return 0 }
+    return (role == .click ? settings.clickVolume : settings.alertVolume) * preference.resolvedSoundVolume
+  }
+
+  func previewSound(_ url: URL, role: PetSoundRole, petID: String) {
+    guard !settings.soundsMuted, settings.petPreferences[petID]?.muted != true else { return }
     if previewingSound == url {
       stopSoundPreview()
       return
@@ -527,10 +637,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
     stopSoundPreview()
     do {
       let player = try AVAudioPlayer(contentsOf: url)
-      player.volume = role == .click ? settings.clickVolume : settings.alertVolume
+      player.volume = soundVolume(for: petID, role: role)
       player.delegate = self
       if player.play() {
         previewPlayer = player
+        previewPetID = petID
         previewRole = role
         previewingSound = url
       }
@@ -541,6 +652,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
     previewPlayer?.stop()
     previewPlayer = nil
     previewingSound = nil
+    previewPetID = nil
   }
 
   func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
@@ -564,17 +676,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
     }
   }
 
-  func setPetPreference(_ id: String, locked: Bool? = nil, muted: Bool? = nil) {
+  func setPetPreference(_ id: String, locked: Bool? = nil, muted: Bool? = nil,
+    cursorTrackingMode: PetCursorTrackingMode? = nil, soundVolume: Float? = nil) {
     var values = settings.petPreferences
     var preference = values[id] ?? PetPreferences()
+    if let cursorTrackingMode { preference.cursorTrackingMode = cursorTrackingMode }
+    if let soundVolume { preference.soundVolume = soundVolume.isFinite ? min(max(soundVolume, 0), 1) : 1 }
     if let locked { preference.positionLocked = locked }
     if let muted {
       preference.muted = muted
-      if muted { soundNotifier.cancel(petID: id) }
+      if muted {
+        soundNotifier.cancel(petID: id)
+        if previewPetID == id { stopSoundPreview() }
+      }
     }
     values[id] = preference
     settings.petPreferences = values
-    petCoordinator.configure(preferences: values, clickVolume: settings.clickVolume)
+    soundNotifier.setPetVolume(preference.resolvedSoundVolume, petID: id)
+    if previewPetID == id { previewPlayer?.volume = self.soundVolume(for: id, role: previewRole) }
+    petCoordinator.configure(preferences: values, clickVolume: settings.clickVolume, muted: settings.soundsMuted)
     rebuildMenu()
   }
 
@@ -591,7 +711,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
     preference.frame = nil
     values[id] = preference
     settings.petPreferences = values
-    petCoordinator.configure(preferences: values, clickVolume: settings.clickVolume)
+    petCoordinator.configure(preferences: values, clickVolume: settings.clickVolume, muted: settings.soundsMuted)
     petCoordinator.movePet(id, to: screen)
     rebuildMenu()
   }
@@ -601,14 +721,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
     rebuildMenu()
   }
 
-  private func assignedSession(for petID: String) -> DetectedAgentSession? {
+  func assignedSession(for petID: String) -> DetectedAgentSession? {
     let ids = selectedPetPackages.map(\.id)
     guard let index = ids.firstIndex(of: petID) else { return nil }
     return sessionRouting.resolvedSessions(for: ids, sessions: detectedSessions)[index]
   }
 
-  private func petContextMenu(_ id: String) -> NSMenu {
+  func cursorTrackingMode(for petID: String) -> PetCursorTrackingMode {
+    settings.petPreferences[petID]?.cursorTrackingMode ?? (settings.followsCursor ? .always : .off)
+  }
+
+  func petContextMenu(_ pet: PetPackage) -> NSMenu {
+    let id = pet.id
     let menu = NSMenu()
+    menu.autoenablesItems = false
     let session = assignedSession(for: id)
     let title =
       (session?.title ?? localized(session == nil ? "No connected session" : "Untitled session"))
@@ -629,50 +755,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
       }
       header.image = icon
     }
-    let name = petPackages.first(where: { $0.id == id }).map { displayName(for: $0) } ?? ""
+    let name = displayName(for: pet)
     let nameField = NSTextField(labelWithString: name)
     nameField.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
-    nameField.textColor = .white
+    nameField.textColor = .labelColor
     nameField.lineBreakMode = .byTruncatingTail
     let label = NSTextField(labelWithString: header.title)
     label.font = .menuFont(ofSize: 0)
-    label.textColor = .white
+    label.textColor = .labelColor
     label.lineBreakMode = .byTruncatingTail
     let width = min(520, max(180, max(label.fittingSize.width + 52, nameField.fittingSize.width + 28)))
-    let headerView = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 50))
-    nameField.frame = NSRect(x: 14, y: 27, width: width - 28, height: 18)
+    let headerHeight: CGFloat = session == nil ? 50 : 70
+    let headerView = NSView(frame: NSRect(x: 0, y: 0, width: width, height: headerHeight))
+    nameField.frame = NSRect(x: 14, y: headerHeight - 23, width: width - 28, height: 18)
     headerView.addSubview(nameField)
-    let iconView = NSImageView(frame: NSRect(x: 14, y: 6, width: 16, height: 16))
+    let iconView = NSImageView(frame: NSRect(x: 14, y: headerHeight - 44, width: 16, height: 16))
     iconView.image = header.image
-    iconView.contentTintColor = .white
+    iconView.contentTintColor = .labelColor
     headerView.addSubview(iconView)
-    label.frame = NSRect(x: 36, y: 5, width: width - 48, height: 18)
+    label.frame = NSRect(x: 36, y: headerHeight - 45, width: width - 48, height: 18)
     headerView.addSubview(label)
-    headerView.toolTip = name + "\n" + title
+    let activity = session.map { localized($0.activity.rawValue) } ?? localized("No connected session")
+    let status = NSTextField(labelWithString: activity)
+    status.font = .menuFont(ofSize: NSFont.smallSystemFontSize)
+    status.textColor = .secondaryLabelColor
+    status.frame = NSRect(x: 36, y: 6, width: width - 48, height: 16)
+    status.lineBreakMode = .byTruncatingTail
+    status.isHidden = session == nil
+    headerView.addSubview(status)
+    headerView.toolTip = [name, title, activity].joined(separator: "\n")
     header.view = headerView
     menu.addItem(header)
     menu.addItem(.separator())
-    let sessionsItem = NSMenuItem(title: localized("Session"), action: nil, keyEquivalent: "")
-    sessionsItem.image = NSImage(systemSymbolName: "link", accessibilityDescription: nil)
-    let sessions = NSMenu()
-    sessions.autoenablesItems = false
     let openAgent = actionItem(title: localized("Open Agent App"), action: #selector(openPetAgent(_:)))
     openAgent.representedObject = id
     openAgent.isEnabled = session != nil
-    sessions.addItem(openAgent)
+    menu.addItem(openAgent)
     let changeSession = actionItem(title: localized("Change Session…"), action: #selector(changePetSession(_:)))
     changeSession.representedObject = id
-    sessions.addItem(changeSession)
-    sessionsItem.submenu = sessions
-    menu.addItem(sessionsItem)
-
-    let optionsItem = NSMenuItem(title: localized("Pet Options"), action: nil, keyEquivalent: "")
-    optionsItem.image = NSImage(systemSymbolName: "slider.horizontal.3", accessibilityDescription: nil)
-    let options = NSMenu()
-    let labelSettings = actionItem(title: localized("Name Label…"), action: #selector(editPetNameLabel(_:)))
-    labelSettings.representedObject = id
-    options.addItem(labelSettings)
-    options.addItem(.separator())
+    changeSession.isEnabled = selectedPetIDs.contains(id)
+    menu.addItem(changeSession)
+    menu.addItem(.separator())
     let preference = settings.petPreferences[id] ?? PetPreferences()
     for (title, action, checked) in [
       ("Lock Position", #selector(togglePetLock(_:)), preference.positionLocked),
@@ -681,10 +804,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
       let item = actionItem(title: localized(title), action: action)
       item.representedObject = id
       item.state = checked ? .on : .off
-      options.addItem(item)
+      menu.addItem(item)
     }
-    optionsItem.submenu = options
-    menu.addItem(optionsItem)
+    if pet.spriteVersion == .v2 {
+      let tracking = NSMenuItem(title: localized("Cursor Tracking"), action: nil, keyEquivalent: "")
+      let modes = NSMenu()
+      modes.autoenablesItems = false
+      for mode in PetCursorTrackingMode.allCases {
+        let item = actionItem(title: localized(mode.rawValue), action: #selector(changePetCursorTracking(_:)))
+        item.representedObject = [id, mode.rawValue]
+        item.state = cursorTrackingMode(for: id) == mode ? .on : .off
+        modes.addItem(item)
+      }
+      tracking.submenu = modes
+      tracking.toolTip = localized("Looks while idle, waiting for input, or completed. Generating, review, failure, dragging, and Reduce Motion take priority.")
+      menu.addItem(tracking)
+    }
+    menu.addItem(.separator())
+    for (title, action) in [
+      ("Sounds…", #selector(editPetSounds(_:))),
+      ("Rename Pet…", #selector(editPetName(_:))),
+      ("Name Label…", #selector(editPetNameLabel(_:))),
+      ("Animations…", #selector(previewPetAnimations(_:))),
+    ] {
+      let item = actionItem(title: localized(title), action: action)
+      item.representedObject = id
+      menu.addItem(item)
+    }
+    let displayItem = NSMenuItem(title: localized("Move to Display"), action: nil, keyEquivalent: "")
+    let displays = NSMenu()
+    displays.autoenablesItems = false
+    for screen in availableScreens {
+      let item = actionItem(title: screen.name, action: #selector(movePetToDisplay(_:)))
+      item.representedObject = id
+      item.tag = Int(screen.id)
+      item.state = preference.screenID == screen.id ? .on : .off
+      displays.addItem(item)
+    }
+    displayItem.submenu = displays
+    menu.addItem(displayItem)
+    let folder = actionItem(title: localized("Open Sound Folder…"), action: #selector(openPetSoundFolder(_:)))
+    folder.representedObject = id
+    menu.addItem(folder)
     return menu
   }
 
@@ -692,8 +853,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
     guard let id = sender.representedObject as? String,
       petPackages.contains(where: { $0.id == id })
     else { return }
-    openSettings()
-    requestedNameLabelPetID = id
+    guard let pet = petPackages.first(where: { $0.id == id }) else { return }
+    showPetSettings(pet, kind: .nameLabel)
+  }
+
+  @objc private func editPetSounds(_ sender: NSMenuItem) {
+    guard let id = sender.representedObject as? String,
+      let pet = petPackages.first(where: { $0.id == id }) else { return }
+    showPetSettings(pet, kind: .sounds)
+  }
+
+  @objc private func previewPetAnimations(_ sender: NSMenuItem) {
+    guard let id = sender.representedObject as? String,
+      let pet = petPackages.first(where: { $0.id == id }) else { return }
+    showPetSettings(pet, kind: .animations)
+  }
+
+  @objc private func editPetName(_ sender: NSMenuItem) {
+    guard let id = sender.representedObject as? String else { return }
+    requestPetRename(id)
+  }
+
+  @objc private func openPetSoundFolder(_ sender: NSMenuItem) {
+    guard let id = sender.representedObject as? String else { return }
+    openSoundFolder(id)
+  }
+
+  @objc private func movePetToDisplay(_ sender: NSMenuItem) {
+    guard let id = sender.representedObject as? String,
+      let screenID = UInt32(exactly: sender.tag) else { return }
+    movePet(id, to: screenID)
+  }
+
+  @objc private func changePetCursorTracking(_ sender: NSMenuItem) {
+    guard let values = sender.representedObject as? [String], values.count == 2,
+      let mode = PetCursorTrackingMode(rawValue: values[1]) else { return }
+    setPetPreference(values[0], cursorTrackingMode: mode)
   }
 
   @objc private func togglePetMute(_ sender: NSMenuItem) {
@@ -706,13 +901,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
   }
   @objc private func changePetSession(_ sender: NSMenuItem) {
     guard let id = sender.representedObject as? String else { return }
-    setSessionMode(.perPet)
-    openSettings()
-    requestedSettingsPetID = id
+    requestSessionChange(id)
   }
   @objc private func openPetAgent(_ sender: NSMenuItem) {
-    guard let id = sender.representedObject as? String,
-      let session = assignedSession(for: id)
+    guard let id = sender.representedObject as? String else { return }
+    openAgentApp(for: id)
+  }
+
+  func openAgentApp(for id: String) {
+    guard let session = assignedSession(for: id)
     else { return }
     let bundleID: String
     switch session.kind {
@@ -773,13 +970,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
   }
 
   private func updateSelectedPetsAfterPackageRefresh() {
-    let availableIDs = Set(petPackages.map(\.id))
-
-    if let selectedIDs = settings.selectedPetIDs {
-      settings.selectedPetIDs = selectedIDs.filter { availableIDs.contains($0) }
-      return
-    }
-
+    guard settings.selectedPetIDs == nil else { return }
     guard !petPackages.isEmpty else { return }
     settings.selectedPetIDs = legacySelectedPetIDs()
   }

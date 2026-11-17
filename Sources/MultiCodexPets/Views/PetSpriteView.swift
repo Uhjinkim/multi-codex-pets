@@ -17,7 +17,9 @@ final class PetSpriteView: NSView {
   private var frameIndex = 0
   private var frameTimer: Timer?
   private var pointerTimer: Timer?
-  private var lookFrame: AnimationFrame?
+  private(set) var lookFrame: AnimationFrame?
+  private var shakeTracker = CursorShakeTracker()
+  private var reduceMotionObserver: NSObjectProtocol?
   private var trackingAreaRef: NSTrackingArea?
   private var dragStartMouseLocation: NSPoint?
   private var dragDirection: DragDirectionTracker?
@@ -27,9 +29,10 @@ final class PetSpriteView: NSView {
 
   let pet: PetPackage
   private(set) var isDragging = false
-  var followsCursor = true {
+  var cursorTrackingMode = PetCursorTrackingMode.always {
     didSet {
-      guard followsCursor != oldValue else { return }
+      guard cursorTrackingMode != oldValue else { return }
+      shakeTracker = CursorShakeTracker()
       updatePointerTracking()
     }
   }
@@ -53,6 +56,14 @@ final class PetSpriteView: NSView {
     super.init(frame: .zero)
     wantsLayer = true
     layer?.backgroundColor = NSColor.clear.cgColor
+    reduceMotionObserver = NSWorkspace.shared.notificationCenter.addObserver(
+      forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+      object: nil, queue: .main
+    ) { [weak self] _ in
+      guard let self else { return }
+      self.restartAnimation(for: self.transientState ?? self.animationState)
+      self.updatePointerTracking()
+    }
     restartAnimation(for: animationState)
   }
 
@@ -62,6 +73,7 @@ final class PetSpriteView: NSView {
   }
 
   deinit {
+    if let reduceMotionObserver { NSWorkspace.shared.notificationCenter.removeObserver(reduceMotionObserver) }
     frameTimer?.invalidate()
     pointerTimer?.invalidate()
   }
@@ -87,7 +99,8 @@ final class PetSpriteView: NSView {
     pointerTimer?.invalidate()
     pointerTimer = nil
     updateLookFrame()
-    guard followsCursor, pet.spriteVersion == .v2, window != nil else { return }
+    guard cursorTrackingMode != .off, pet.spriteVersion == .v2, window != nil,
+      !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
     let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
       self?.updateLookFrame()
     }
@@ -95,23 +108,27 @@ final class PetSpriteView: NSView {
     pointerTimer = timer
   }
 
-  private func updateLookFrame() {
+  func updateLookFrame(pointer: CGPoint = NSEvent.mouseLocation,
+    now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
     let nextFrame: AnimationFrame?
-    if followsCursor, pet.spriteVersion == .v2, animationState == .idle,
+    if cursorTrackingMode != .off, pet.spriteVersion == .v2, animationState.allowsCursorTracking,
       transientState == nil, !isDragging,
       !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
       let window, window.isVisible
     {
+      let shouldLook = cursorTrackingMode == .always
+        || shakeTracker.update(point: pointer, now: now)
       let center = window.convertPoint(
         toScreen: convert(
           NSPoint(x: bounds.midX, y: bounds.midY), to: nil
         ))
-      nextFrame = pet.spriteVersion.lookFrame(
-        pointer: NSEvent.mouseLocation,
+      nextFrame = shouldLook ? pet.spriteVersion.lookFrame(
+        pointer: pointer,
         center: center,
         deadzone: min(bounds.width, bounds.height) * 0.25
-      )
+      ) : nil
     } else {
+      shakeTracker = CursorShakeTracker()
       nextFrame = nil
     }
     guard lookFrame != nextFrame else { return }

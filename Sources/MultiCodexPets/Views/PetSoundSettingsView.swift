@@ -6,9 +6,14 @@ struct PetSoundSettingsView: View {
   @ObservedObject var app: AppDelegate
   let pet: PetPackage
   @Environment(\.dismiss) private var dismiss
-  @State private var alertActivityKey = ""
+  @State private var alertPoolKey = ""
   @State private var previewRole = PetSoundRole.click
-  private var alertActivity: AgentActivity? { AgentActivity(rawValue: alertActivityKey) }
+  @State private var showsGlobalVolume = false
+  @State private var soundSearch = ""
+  private var notificationKey: String? { alertPoolKey.isEmpty ? nil : alertPoolKey }
+  private var alertPoolTitle: String {
+    alertPoolKey == OrcaMessageEvent.soundKey ? "Orca message sent" : (notificationKey ?? "Default alerts")
+  }
 
   private var scale: CGFloat { app.settingsLayout.scale }
   private var detailFont: Font { .system(size: 13 * scale) }
@@ -41,6 +46,7 @@ struct PetSoundSettingsView: View {
       height: min(680, app.settingsLayout.contentSize.height - 60)
     )
     .onChange(of: previewRole) { _ in app.stopSoundPreview() }
+    .onAppear { soundSearch = pet.displayName }
     .onDisappear { app.stopSoundPreview() }
   }
 
@@ -61,9 +67,42 @@ struct PetSoundSettingsView: View {
       }
       .padding(20)
       Divider()
-      HStack(spacing: 24) {
-        volumeSlider(.click, title: "Click Volume")
-        volumeSlider(.notification, title: "Alert Volume")
+      VStack(alignment: .leading, spacing: 12) {
+        Toggle(localized("Mute This Pet"), isOn: Binding(
+          get: { app.settings.petPreferences[pet.id]?.muted ?? false },
+          set: { app.setPetPreference(pet.id, muted: $0) }))
+        HStack {
+          Text(localized("Pet Volume"))
+          Slider(value: Binding(
+            get: { Double(app.settings.petPreferences[pet.id]?.resolvedSoundVolume ?? 1) },
+            set: { app.setPetPreference(pet.id, soundVolume: Float($0)) }), in: 0...1)
+            .labelsHidden().accessibilityLabel(localized("Pet Volume"))
+          Text(Double(app.settings.petPreferences[pet.id]?.resolvedSoundVolume ?? 1)
+            .formatted(.percent.precision(.fractionLength(0))))
+            .monospacedDigit().frame(width: 54, alignment: .trailing)
+        }
+        .disabled(app.settings.petPreferences[pet.id]?.muted == true)
+        DisclosureGroup(localized("Global Volume — All Pets"), isExpanded: $showsGlobalVolume) {
+          GlobalSoundVolumeSettings(app: app).padding(.top, 10)
+        }
+        .font(detailFont)
+        if app.settings.soundsMuted {
+          Text(localized("All pet sounds are muted. Unmute in Global Volume to hear this pet."))
+            .font(detailFont).foregroundStyle(.secondary)
+        }
+      }
+      .padding(.horizontal, 20).padding(.vertical, 14)
+      Divider()
+      VStack(alignment: .leading, spacing: 6) {
+        HStack {
+          TextField(localized("Character name or alias"), text: $soundSearch)
+            .textFieldStyle(.roundedBorder)
+            .onSubmit { openSoundSearch() }
+          Button(localized("Find on Myinstants…")) { openSoundSearch() }
+        }
+        Text(localized("Preview and download in your browser, then add the file as a click or alert sound below."))
+          .font(detailFont).foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
       }
       .padding(.horizontal, 20).padding(.vertical, 14)
       Divider()
@@ -78,7 +117,7 @@ struct PetSoundSettingsView: View {
             Label(localized("Add Click Sounds…"), systemImage: "plus")
           }
           Button {
-            app.chooseSoundFile(for: pet.id, role: .notification, activity: alertActivity)
+            app.chooseSoundFile(for: pet.id, role: .notification, notificationKey: notificationKey)
           } label: {
             Label(localized("Add Notification Sounds…"), systemImage: "bell.badge")
           }
@@ -97,8 +136,8 @@ struct PetSoundSettingsView: View {
           }
         }
         Text(
-          alertActivity.map {
-            localizedFormat("Editing alert sounds for %@.", localized($0.rawValue))
+          notificationKey.map { _ in
+            localizedFormat("Editing alert sounds for %@.", localized(alertPoolTitle))
           }
             ?? localized("The default alert pool is used unless a state has its own sounds.")
         )
@@ -126,26 +165,33 @@ struct PetSoundSettingsView: View {
   private var poolControls: some View {
     HStack(spacing: 8) {
       Menu {
-        Button(localized("Default alerts")) { alertActivityKey = "" }
+        Button(localized("Default alerts")) { alertPoolKey = "" }
         ForEach(AgentActivity.allCases.filter { $0 != .unknown }, id: \.self) { activity in
-          Button(localized(activity.rawValue)) { alertActivityKey = activity.rawValue }
+          Button(localized(activity.rawValue)) { alertPoolKey = activity.rawValue }
         }
+        Divider()
+        Button(localized("Orca message sent")) { alertPoolKey = OrcaMessageEvent.soundKey }
       } label: {
-        Label(localized(alertActivity?.rawValue ?? "Default alerts"), systemImage: "bell")
+        Label(localized(alertPoolTitle), systemImage: "bell")
           .font(detailFont).lineLimit(1)
       }
       .fixedSize(horizontal: true, vertical: false)
       .controlSize(.regular)
       .help(localized("Alert pool"))
-      if let alertActivity {
+      if notificationKey != nil {
         Button {
-          app.useDefaultAlertPool(petID: pet.id, activity: alertActivity)
+          app.useDefaultAlertPool(petID: pet.id, notificationKey: notificationKey)
         } label: {
           Image(systemName: "arrow.counterclockwise")
         }
         .help(localized("Use default pool")).accessibilityLabel(localized("Use default pool"))
       }
     }
+  }
+
+  private func openSoundSearch() {
+    app.stopSoundPreview()
+    if !NSWorkspace.shared.open(CatalogSearch.soundURL(query: soundSearch)) { NSSound.beep() }
   }
 
   private var previewControls: some View {
@@ -170,9 +216,12 @@ struct PetSoundSettingsView: View {
   }
 
   private var fileList: some View {
-    ScrollView {
+    let files = app.sounds(for: pet.id)
+    let clickSounds = Set(app.sounds(for: pet.id, role: .click).map(\.lastPathComponent))
+    let alertSounds = Set(app.sounds(for: pet.id, role: .notification, notificationKey: notificationKey).map(\.lastPathComponent))
+    return ScrollView {
       LazyVStack(spacing: 0) {
-        if app.sounds(for: pet.id).isEmpty {
+        if files.isEmpty {
           VStack(spacing: 10) {
             Image(systemName: "waveform").font(.system(size: 28))
             Text(localized("Add audio files to enable sounds for this pet."))
@@ -180,21 +229,22 @@ struct PetSoundSettingsView: View {
           .foregroundStyle(.secondary).multilineTextAlignment(.center)
           .frame(maxWidth: .infinity).padding(.vertical, 36)
         }
-        ForEach(app.sounds(for: pet.id), id: \.lastPathComponent) { url in
+        ForEach(files, id: \.lastPathComponent) { url in
           HStack(spacing: 10) {
             Button {
-              app.previewSound(url, role: previewRole)
+              app.previewSound(url, role: previewRole, petID: pet.id)
             } label: {
               Image(systemName: app.previewingSound == url ? "stop.fill" : "play.fill")
                 .frame(width: 32, height: 32).contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
+            .disabled(app.settings.soundsMuted || app.settings.petPreferences[pet.id]?.muted == true)
             .accessibilityLabel(
               localized(app.previewingSound == url ? "Stop preview" : "Play preview"))
             Text(url.lastPathComponent).lineLimit(1).truncationMode(.middle)
               .help(url.lastPathComponent).frame(maxWidth: .infinity, alignment: .leading)
-            roleToggle(url, role: .click).frame(width: 72)
-            roleToggle(url, role: .notification).frame(width: 72)
+            roleToggle(url, role: .click, enabled: clickSounds.contains(url.lastPathComponent)).frame(width: 72)
+            roleToggle(url, role: .notification, enabled: alertSounds.contains(url.lastPathComponent)).frame(width: 72)
           }
           .padding(.horizontal, 12).frame(minHeight: 48 * scale)
           .background(app.previewingSound == url ? Color.accentColor.opacity(0.06) : .clear)
@@ -204,39 +254,14 @@ struct PetSoundSettingsView: View {
     }
   }
 
-  private func volumeSlider(_ role: PetSoundRole, title: String) -> some View {
-    VStack(alignment: .leading, spacing: 6) {
-      HStack {
-        Label(localized(title), systemImage: role == .click ? "speaker.wave.2" : "bell")
-        Spacer()
-        Text(
-          Double(role == .click ? app.settings.clickVolume : app.settings.alertVolume)
-            .formatted(.percent.precision(.fractionLength(0)))
-        )
-        .monospacedDigit().foregroundStyle(.secondary)
-      }
-      Slider(
-        value: Binding(
-          get: { Double(role == .click ? app.settings.clickVolume : app.settings.alertVolume) },
-          set: { app.setVolume(Float($0), role: role) }), in: 0...1
-      )
-      .labelsHidden().accessibilityLabel(localized(title))
-    }
-  }
-
-  private func roleToggle(_ url: URL, role: PetSoundRole) -> some View {
+  private func roleToggle(_ url: URL, role: PetSoundRole, enabled: Bool) -> some View {
     Toggle(
       isOn: Binding(
-        get: {
-          app.sounds(for: pet.id, role: role, activity: role == .notification ? alertActivity : nil)
-            .contains {
-              $0.lastPathComponent == url.lastPathComponent
-            }
-        },
+        get: { enabled },
         set: {
           app.setSoundUsage(
             $0, filename: url.lastPathComponent, petID: pet.id, role: role,
-            activity: role == .notification ? alertActivity : nil)
+            notificationKey: role == .notification ? notificationKey : nil)
         })
     ) {
       Text(localized(role == .click ? "Click" : "Alert"))

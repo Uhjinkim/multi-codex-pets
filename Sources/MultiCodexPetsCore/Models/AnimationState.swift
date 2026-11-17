@@ -13,6 +13,10 @@ public enum AnimationState: String, CaseIterable, Identifiable {
 
   public var id: String { rawValue }
 
+  public var allowsCursorTracking: Bool {
+    self == .idle || self == .waiting || self == .waving
+  }
+
   public var displayName: String {
     switch self {
     case .idle:

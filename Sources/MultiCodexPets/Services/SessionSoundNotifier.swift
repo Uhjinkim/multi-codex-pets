@@ -3,16 +3,26 @@ import Foundation
 
 /// Serializes notifications so several assigned pets do not speak over each other.
 final class SessionSoundNotifier: NSObject, AVAudioPlayerDelegate {
-  private var pending: [(petID: String, sounds: [URL])] = []
+  private var pending: [(petID: String, sounds: [URL], volume: Float, notificationKey: String?)] = []
   private var player: AVAudioPlayer?
   private var playingPetID: String?
-  var volume: Float = 1 { didSet { player?.volume = volume } }
+  private var playingVolume: Float = 1
+  var volume: Float = 1 { didSet { player?.volume = volume * playingVolume } }
 
-  func enqueue(petID: String, sounds: [URL]) {
-    guard !sounds.isEmpty else { return }
-    pending.removeAll { $0.petID == petID }
-    pending.append((petID, sounds))
+  func enqueue(petID: String, sounds: [URL], petVolume: Float = 1, notificationKey: String? = nil) {
+    guard !sounds.isEmpty, petVolume > 0, volume > 0 else { return }
+    pending.removeAll { $0.petID == petID && $0.notificationKey == notificationKey }
+    pending.append((petID, sounds, petVolume, notificationKey))
     playNext()
+  }
+
+  func setPetVolume(_ value: Float, petID: String) {
+    guard value > 0 else { cancel(petID: petID); return }
+    for index in pending.indices where pending[index].petID == petID { pending[index].volume = value }
+    if playingPetID == petID {
+      playingVolume = value
+      player?.volume = volume * playingVolume
+    }
   }
 
   func stop() {
@@ -40,7 +50,8 @@ final class SessionSoundNotifier: NSObject, AVAudioPlayerDelegate {
         do {
           let candidate = try AVAudioPlayer(contentsOf: url)
           candidate.delegate = self
-          candidate.volume = volume
+          playingVolume = next.volume
+          candidate.volume = volume * playingVolume
           if candidate.play() {
             player = candidate
             playingPetID = next.petID

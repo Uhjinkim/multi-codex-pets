@@ -3,6 +3,31 @@ import MultiCodexPetsCore
 import XCTest
 
 final class PetSoundLibraryTests: XCTestCase {
+  func testMessageSoundPoolIsIndependentOfCompletionAndCanRestoreTheDefault() throws {
+    let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: home) }
+    try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+    let library = PetSoundLibrary(codexHome: home)
+    let source = home.appendingPathComponent("done.wav")
+    try Data([1]).write(to: source)
+    try library.importSound(from: source, forPetID: "cat", role: .notification)
+    let message = home.appendingPathComponent("message.wav")
+    try Data([2]).write(to: message)
+    try library.importSound(from: message, forPetID: "cat", role: .notification,
+      notificationKey: OrcaMessageEvent.soundKey)
+    XCTAssertEqual(library.soundURLs(forPetID: "cat", role: .notification,
+      activity: .completed).map(\.lastPathComponent), ["done.wav"])
+    XCTAssertEqual(Set(library.soundURLs(forPetID: "cat", role: .notification,
+      notificationKey: OrcaMessageEvent.soundKey).map(\.lastPathComponent)), ["done.wav", "message.wav"])
+    try library.setUsage(false, filename: "done.wav", forPetID: "cat", role: .notification,
+      notificationKey: OrcaMessageEvent.soundKey)
+    XCTAssertEqual(library.soundURLs(forPetID: "cat", role: .notification,
+      notificationKey: OrcaMessageEvent.soundKey).map(\.lastPathComponent), ["message.wav"])
+    XCTAssertEqual(library.soundURLs(forPetID: "cat", role: .notification).map(\.lastPathComponent), ["done.wav"])
+    try library.useDefaultNotificationPool(forPetID: "cat", notificationKey: OrcaMessageEvent.soundKey)
+    XCTAssertEqual(library.soundURLs(forPetID: "cat", role: .notification,
+      notificationKey: OrcaMessageEvent.soundKey).map(\.lastPathComponent), ["done.wav"])
+  }
   func testFindsOnlyAudioFilesForChosenPetInFilenameOrder() throws {
     let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: home) }

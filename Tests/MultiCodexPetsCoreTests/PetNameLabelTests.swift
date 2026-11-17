@@ -9,6 +9,8 @@ final class PetNameLabelTests: XCTestCase {
     style.position = .above
     style.fontSize = 18
     style.colorHex = "12ABEF"
+    style.backgroundColorHex = "345678"
+    style.backgroundOpacity = 0.4
     preference.nameLabel = style
     preference.customName = "My pet"
     let restored = try JSONDecoder().decode(PetPreferences.self,
@@ -16,6 +18,8 @@ final class PetNameLabelTests: XCTestCase {
     XCTAssertEqual(restored.nameLabel?.position, .above)
     XCTAssertEqual(restored.nameLabel?.resolvedFontSize, 18)
     XCTAssertEqual(restored.nameLabel?.rgb, 0x12ABEF)
+    XCTAssertEqual(restored.nameLabel?.backgroundRGB, 0x345678)
+    XCTAssertEqual(restored.nameLabel?.resolvedBackgroundOpacity, 0.4)
     XCTAssertEqual(restored.customName, "My pet")
     let legacy = try JSONDecoder().decode(PetPreferences.self,
       from: Data(#"{"positionLocked":false,"muted":false}"#.utf8))
@@ -31,6 +35,28 @@ final class PetNameLabelTests: XCTestCase {
     for color in ["bad", "GGGGGG", "1234567", ""] {
       style.colorHex = color
       XCTAssertEqual(style.rgb, 0xFFFFFF)
+    }
+  }
+
+  func testExistingLabelStylesKeepTheirNamesFontsAndOriginalBackground() throws {
+    let data = Data(#"{"position":"Above Pet","fontSize":18,"colorHex":"12ABEF"}"#.utf8)
+    let style = try JSONDecoder().decode(PetNameLabel.self, from: data)
+    XCTAssertEqual(style.position, .above)
+    XCTAssertEqual(style.resolvedFontSize, 18)
+    XCTAssertEqual(style.rgb, 0x12ABEF)
+    XCTAssertEqual(style.backgroundRGB, 0)
+    XCTAssertEqual(style.resolvedBackgroundOpacity, 0.65)
+  }
+
+  func testBackgroundValuesClampAndInvalidColorsUseBlack() {
+    var style = PetNameLabel()
+    for (value, expected) in [(Double.nan, 0.65), (.infinity, 0.65), (-1, 0), (2, 1), (0.25, 0.25)] {
+      style.backgroundOpacity = value
+      XCTAssertEqual(style.resolvedBackgroundOpacity, expected)
+    }
+    for hex in ["bad", "GGGGGG", "1234567", ""] {
+      style.backgroundColorHex = hex
+      XCTAssertEqual(style.backgroundRGB, 0)
     }
   }
 
