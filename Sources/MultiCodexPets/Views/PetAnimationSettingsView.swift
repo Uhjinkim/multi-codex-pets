@@ -8,6 +8,10 @@ struct PetAnimationSettingsView: View {
   @Environment(\.dismiss) private var dismiss
   @State private var animation = MultiCodexPetsCore.AnimationState.idle
   @State private var previewsGaze = false
+  @State private var editsDirections = false
+  @State private var previewRevision = 0
+
+  private var currentPet: PetPackage { app.petPackages.first { $0.id == pet.id } ?? pet }
 
   private var scale: CGFloat { app.settingsLayout.scale }
 
@@ -31,8 +35,9 @@ struct PetAnimationSettingsView: View {
           }
           ReduceMotionSettingsLink()
           PetAnimationPreview(
-            pet: pet, animation: previewsGaze ? .idle : animation, followsCursor: previewsGaze
+            pet: currentPet, animation: previewsGaze ? .idle : animation, followsCursor: previewsGaze
           )
+            .id(previewRevision)
             .frame(width: 144 * scale, height: 156 * scale)
             .frame(maxWidth: .infinity)
             .accessibilityLabel(localized(previewsGaze ? "Preview Cursor Tracking" : animation.displayName))
@@ -40,6 +45,9 @@ struct PetAnimationSettingsView: View {
             Text(localized("Move the cursor around the preview to see all 16 look directions. Reduce Motion takes priority."))
               .font(.system(size: 13 * scale)).foregroundStyle(.secondary)
               .fixedSize(horizontal: false, vertical: true)
+          }
+          if pet.source == .custom {
+            Button(localized("Arrange Direction Frames…")) { editsDirections = true }
           }
           LazyVGrid(columns: [GridItem(.adaptive(minimum: 140 * scale), spacing: 8 * scale)], spacing: 8 * scale) {
             ForEach(MultiCodexPetsCore.AnimationState.allCases) { state in
@@ -80,6 +88,9 @@ struct PetAnimationSettingsView: View {
       .padding(20 * scale)
     }
     .font(.system(size: 14 * scale))
+    .sheet(isPresented: $editsDirections, onDismiss: { previewRevision += 1 }) {
+      PetDirectionSettingsView(app: app, pet: currentPet)
+    }
     .controlSize(.large)
     .frame(width: min(600, app.settingsLayout.contentSize.width - 60),
       height: min(720, app.settingsLayout.contentSize.height - 60))

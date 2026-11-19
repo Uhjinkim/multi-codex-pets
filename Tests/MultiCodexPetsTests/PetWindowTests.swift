@@ -93,6 +93,33 @@ final class PetWindowTests: XCTestCase {
     try XCTUnwrap(NSApp.windows.first { ($0.contentView as? PetSpriteView)?.pet.id == pet.id && $0.isVisible })
   }
 
+  func testPerPetSizeAppliesImmediatelyAndCanReturnToSharedSize() throws {
+    _ = NSApplication.shared
+    let coordinator = PetCoordinator()
+    defer { coordinator.hidePets() }
+    let pets = ["size-custom", "size-shared"].map { id in
+      PetPackage(id: id, folderName: id, displayName: id, description: nil,
+        spritesheetURL: URL(fileURLWithPath: "/missing"), packageDirectory: URL(fileURLWithPath: "/tmp"))
+    }
+    coordinator.showPets(pets, state: .idle, scale: 1)
+    let shared = try window(for: pets[1])
+    let originalFrame = shared.frame
+    var preference = PetPreferences()
+    preference.scale = 1.5
+    let restored = try JSONDecoder().decode(PetPreferences.self, from: JSONEncoder().encode(preference))
+    coordinator.configure(preferences: [pets[0].id: restored], clickVolume: 1)
+    XCTAssertEqual(try window(for: pets[0]).frame.width, 120)
+    XCTAssertEqual(shared.frame, originalFrame)
+    coordinator.setScale(0.75)
+    XCTAssertEqual(try window(for: pets[0]).frame.width, 120)
+    XCTAssertEqual(shared.frame.width, 60)
+    coordinator.hidePets()
+    coordinator.showPets(pets, state: .idle, scale: 0.75)
+    XCTAssertEqual(try window(for: pets[0]).frame.width, 120)
+    coordinator.configure(preferences: [:], clickVolume: 1)
+    XCTAssertEqual(try window(for: pets[0]).frame.width, 60)
+  }
+
   func testPerPetCursorAndVolumeOverridesSurviveGlobalChangesAndReopening() throws {
     _ = NSApplication.shared
     let coordinator = PetCoordinator()

@@ -209,3 +209,28 @@
 "Sound settings" = "소리 설정";
 "Sound settings for %@" = "%@ 소리 설정";
 "Looks while idle, waiting for input, or completed. Generating, review, failure, dragging, and Reduce Motion take priority." = "기본 대기·입력 대기·완료 상태에서 바라봅니다. 생성·검토·실패·드래그와 동작 줄이기가 우선합니다.";
+
+"Arrange Direction Frames…" = "방향 프레임 배치…";
+"Arrange frames for %@" = "%@ 방향 프레임 배치";
+"Select two frames to swap them. Select a frame to flip it horizontally." = "두 칸을 차례로 누르면 위치가 바뀝니다. 한 칸을 선택한 뒤 좌우 반전할 수도 있습니다.";
+"Could not read the sprite frames. Refresh pets and try again." = "프레임을 읽지 못했습니다. 펫을 새로고침한 뒤 다시 시도하세요.";
+"Swap Running Rows" = "달리기 좌우 행 교체";
+"Flip Selected Frame" = "선택한 칸 좌우 반전";
+"Run Right" = "오른쪽 달리기";
+"Run Left" = "왼쪽 달리기";
+"Up to Lower Right" = "위쪽에서 오른쪽 아래까지";
+"Down to Upper Left" = "아래쪽에서 왼쪽 위까지";
+"Restore Original Layout" = "원본 배치로 복원";
+"Apply" = "적용";
+"Could not apply frame layout" = "프레임 배치를 적용하지 못했습니다";
+"The sprite file changed. Close this window, refresh pets, and try again." = "스프라이트 파일이 바뀌었습니다. 창을 닫고 펫을 새로고침한 뒤 다시 시도하세요.";
+"OK" = "확인";
+
+"Pet Size" = "펫 크기";
+"Use Shared Size" = "공통 크기 사용";
+"Shared Pet Size" = "공통 펫 크기";
+
+"Pet Settings" = "펫 설정";
+"Pet Settings…" = "펫 설정…";
+"Settings for %@" = "%@ 설정";
+"Name Label" = "이름표";

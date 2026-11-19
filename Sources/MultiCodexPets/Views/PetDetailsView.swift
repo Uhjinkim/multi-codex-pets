@@ -2,11 +2,13 @@ import AppKit
 import MultiCodexPetsCore
 import SwiftUI
 
-struct PetNameLabelSettingsView: View {
+struct PetDetailsView: View {
   @ObservedObject var app: AppDelegate
   let pet: PetPackage
   @Environment(\.dismiss) private var dismiss
+  @State private var name = ""
 
+  private var preference: PetPreferences { app.settings.petPreferences[pet.id] ?? PetPreferences() }
   private var style: PetNameLabel { app.settings.petPreferences[pet.id]?.nameLabel ?? PetNameLabel() }
   private var scale: CGFloat { app.settingsLayout.scale }
 
@@ -28,6 +30,7 @@ struct PetNameLabelSettingsView: View {
     .font(.system(size: 14 * scale)).controlSize(.large)
     .frame(width: min(520, app.settingsLayout.contentSize.width - 60),
       height: min(660, app.settingsLayout.contentSize.height - 60))
+    .onAppear { name = app.displayName(for: pet) }
     .onDisappear { NSColorPanel.shared.close() }
     .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { notification in
       if let panel = notification.object as? NSColorPanel, panel.isVisible { panel.close() }
@@ -36,19 +39,73 @@ struct PetNameLabelSettingsView: View {
 
   private var controls: some View {
     VStack(alignment: .leading, spacing: 16) {
-      Text(localizedFormat("Name Label for %@", app.displayName(for: pet)))
+      Text(localizedFormat("Settings for %@", app.displayName(for: pet)))
         .font(.system(size: 19 * scale, weight: .semibold)).lineLimit(2)
+      HStack {
+        TextField(localized("Pet Name"), text: $name)
+          .onSubmit(saveName)
+        Button(localized("Save"), action: saveName)
+          .disabled(name.trimmedNonEmpty == nil || name == app.displayName(for: pet))
+        if preference.customName != nil {
+          Button(localized("Use Original Name")) {
+            app.renamePet(pet.id, to: "")
+            name = app.displayName(for: pet)
+          }
+        }
+      }
+      Picker(localized("Pet Size"), selection: Binding(
+        get: { preference.scale }, set: { app.setPetScale(pet.id, to: $0) }
+      )) {
+        Text(localized("Use Shared Size")).tag(nil as Double?)
+        ForEach(AppDelegate.petSizePercents, id: \.self) { percent in
+          Text("\(percent)%").tag(Optional(Double(percent) / 100))
+        }
+      }
+      if pet.spriteVersion == .v2 {
+        Picker(localized("Cursor Tracking"), selection: Binding(
+          get: { app.cursorTrackingMode(for: pet.id) },
+          set: { app.setPetPreference(pet.id, cursorTrackingMode: $0) }
+        )) {
+          ForEach(PetCursorTrackingMode.allCases, id: \.self) { mode in
+            Text(localized(mode.rawValue)).tag(mode)
+          }
+        }
+      }
+      Toggle(localized("Lock Position"), isOn: Binding(
+        get: { preference.positionLocked }, set: { app.setPetPreference(pet.id, locked: $0) }))
+      Toggle(localized("Mute This Pet"), isOn: Binding(
+        get: { preference.muted }, set: { app.setPetPreference(pet.id, muted: $0) }))
+      if app.availableScreens.count > 1 {
+        Menu(localized("Move to Display")) {
+          ForEach(app.availableScreens, id: \.id) { screen in
+            Button(screen.name) { app.movePet(pet.id, to: screen.id) }
+          }
+        }
+        .disabled(!app.selectedPetIDs.contains(pet.id))
+      }
+      HStack {
+        Button(localized("Change Session…")) {
+          dismiss()
+          app.requestSessionChange(pet.id)
+        }
+        .disabled(!app.selectedPetIDs.contains(pet.id))
+        if app.assignedSession(for: pet.id) != nil {
+          Button(localized("Open Agent App")) { app.openAgentApp(for: pet.id) }
+        }
+      }
+      Divider()
+      Text(localized("Name Label")).font(.headline)
       VStack(spacing: 3) {
         if style.position == .above { nameLabel }
         if let image = app.previewImage(for: pet) {
           Image(nsImage: image).resizable().interpolation(.high).scaledToFit()
-            .frame(width: 80 * app.settings.scale, height: 87 * app.settings.scale)
+            .frame(width: 80 * petScale, height: 87 * petScale)
             .accessibilityHidden(true)
         }
         if style.position == .below { nameLabel }
       }
       .frame(maxWidth: .infinity)
-      .frame(height: max(120, 87 * app.settings.scale + style.resolvedFontSize + 24))
+      .frame(height: max(120, 87 * petScale + style.resolvedFontSize + 24))
       Picker(localized("Label Position"), selection: Binding(
         get: { style.position },
         set: { var value = style; value.position = $0; app.setPetNameLabel(pet.id, style: value) }
@@ -89,6 +146,14 @@ struct PetNameLabelSettingsView: View {
         .font(.system(size: 13 * scale)).foregroundStyle(.secondary)
     }
     .padding(20 * scale)
+  }
+
+  private var petScale: Double { preference.resolvedScale(default: app.settings.scale) }
+
+  private func saveName() {
+    guard name.trimmedNonEmpty != nil else { return }
+    app.renamePet(pet.id, to: name)
+    name = app.displayName(for: pet)
   }
 
   private func setColor(_ color: Color, background: Bool) {

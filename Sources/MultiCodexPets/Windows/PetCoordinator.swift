@@ -10,6 +10,7 @@ final class PetCoordinator {
   private var lastWalkingTickAt: Date?
   private var walksAround = false
   private var followsCursor = true
+  private var defaultScale: Double = 1
   private var preferences: [String: PetPreferences] = [:]
   private var clickVolume: Float = 1
   private var soundsMuted = false
@@ -22,6 +23,7 @@ final class PetCoordinator {
     soundsMuted = muted
     for (id, controller) in windowControllersByPetID {
       let preference = preferences[id] ?? PetPreferences()
+      controller.setScale(preference.resolvedScale(default: defaultScale))
       controller.setInteraction(
         volume: clickVolume * preference.resolvedSoundVolume,
         muted: soundsMuted || preference.muted, locked: preference.positionLocked)
@@ -94,6 +96,7 @@ final class PetCoordinator {
     state: AnimationState,
     scale: Double
   ) {
+    defaultScale = scale
     guard !packages.isEmpty else {
       hidePets()
       return
@@ -107,11 +110,12 @@ final class PetCoordinator {
 
     var nextVisiblePetIDs: [String] = []
     for (index, package) in packages.enumerated() {
+      let petScale = (preferences[package.id] ?? PetPreferences()).resolvedScale(default: defaultScale)
       let controller =
         existingController(for: package)
-        ?? makeController(for: package, index: index, state: state, scale: scale)
+        ?? makeController(for: package, index: index, state: state, scale: petScale)
       controller.setCursorTrackingMode(preferences[package.id]?.cursorTrackingMode ?? (followsCursor ? .always : .off))
-      controller.setScale(scale)
+      controller.setScale(petScale)
       let now = Date()
       let motion = walkingMotion(
         forPetID: package.id,
@@ -162,8 +166,10 @@ final class PetCoordinator {
   }
 
   func setScale(_ scale: Double) {
+    defaultScale = scale
     for controller in visibleControllers {
-      controller.setScale(scale)
+      let preference = preferences[controller.pet.id] ?? PetPreferences()
+      controller.setScale(preference.resolvedScale(default: defaultScale))
     }
   }
 

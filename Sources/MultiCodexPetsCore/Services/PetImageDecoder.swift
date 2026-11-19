@@ -19,7 +19,7 @@ public enum PetImageDecoder {
     }
   }
 
-  public static func cell(in sheet: CGImage, frame: AnimationFrame) -> CGImage? {
+  public static func cell(in sheet: CGImage, frame: AnimationFrame, mirrored: Bool = false) -> CGImage? {
     guard sheet.width == PetAtlas.width,
       frame.columnIndex >= 0, frame.columnIndex < PetAtlas.columns,
       frame.rowIndex >= 0, frame.rowIndex < sheet.height / PetAtlas.cellHeight,
@@ -27,15 +27,19 @@ public enum PetImageDecoder {
         x: frame.columnIndex * PetAtlas.cellWidth, y: frame.rowIndex * PetAtlas.cellHeight,
         width: PetAtlas.cellWidth, height: PetAtlas.cellHeight))
     else { return nil }
-    return bitmapCopy(cell)
+    return bitmapCopy(cell, mirrored: mirrored)
   }
 
-  private static func bitmapCopy(_ image: CGImage) -> CGImage? {
+  private static func bitmapCopy(_ image: CGImage, mirrored: Bool = false) -> CGImage? {
     guard let context = CGContext(data: nil, width: image.width, height: image.height,
       bitsPerComponent: 8, bytesPerRow: image.width * 4,
       space: CGColorSpace(name: CGColorSpace.sRGB)!,
       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
     else { return nil }
+    if mirrored {
+      context.translateBy(x: CGFloat(image.width), y: 0)
+      context.scaleBy(x: -1, y: 1)
+    }
     // Own decoded pixels so each draw neither invokes a codec nor converts the whole atlas.
     context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
     return context.makeImage()

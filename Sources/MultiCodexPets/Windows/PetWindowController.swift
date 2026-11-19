@@ -90,7 +90,11 @@ final class PetWindowController: NSWindowController, NSWindowDelegate {
 
     let oldFrame = window.frame
     let newSize = Self.windowSize(scale: scale)
-    let newFrame = NSRect(origin: oldFrame.origin, size: newSize)
+    guard oldFrame.size != newSize else { return }
+    var newFrame = NSRect(origin: oldFrame.origin, size: newSize)
+    if let screen = window.screen {
+      newFrame = PetPlacement.fitted(newFrame, to: screen.visibleFrame)
+    }
     window.setFrame(newFrame, display: true)
     petView.frame = NSRect(origin: .zero, size: newSize)
     updateNameLabel()

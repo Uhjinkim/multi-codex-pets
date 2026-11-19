@@ -54,11 +54,13 @@ final class PetMenuTests: XCTestCase {
   func testMenuOffersDirectActionsAndCursorOptionsOnlyForV2() throws {
     let v1 = app.petContextMenu(pet("v1", version: .v1))
     let v2 = app.petContextMenu(pet("v2", version: .v2))
-    for title in ["Change Session…", "Lock Position", "Mute This Pet", "Sounds…",
-      "Rename Pet…", "Name Label…", "Animations…", "Move to Display", "Open Sound Folder…"] {
+    for title in ["Change Session…", "Pet Size", "Lock Position", "Mute This Pet", "Pet Settings…"] {
       XCTAssertNotNil(v2.item(withTitle: localized(title)))
     }
-    XCTAssertFalse(try XCTUnwrap(v2.item(withTitle: localized("Open Agent App"))).isEnabled)
+    for title in ["Sounds…", "Rename Pet…", "Name Label…", "Animations…",
+      "Move to Display", "Open Sound Folder…", "Arrange Direction Frames…", "Open Agent App"] {
+      XCTAssertNil(v2.item(withTitle: localized(title)))
+    }
     XCTAssertNil(v2.item(withTitle: localized("Session")))
     XCTAssertNil(v1.item(withTitle: localized("Cursor Tracking")))
     let tracking = try XCTUnwrap(v2.item(withTitle: localized("Cursor Tracking"))?.submenu)

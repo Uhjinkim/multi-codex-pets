@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 public enum PetSource: String, Equatable {
@@ -15,6 +16,13 @@ public struct PetPackage: Equatable, Identifiable {
   public let packageDirectory: URL
   public let spriteVersion: PetSpriteVersion
   public let source: PetSource
+  public var directionLayout: PetDirectionLayout?
+
+  public func spritesheetHash() -> String? {
+    guard let data = spritesheetData ?? (try? Data(contentsOf: spritesheetURL, options: .mappedIfSafe))
+    else { return nil }
+    return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+  }
 
   public init(
     id: String,

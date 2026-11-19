@@ -11,7 +11,7 @@ enum PetBehaviorMode: String, CaseIterable {
 enum SettingsTab { case pets, behavior, sessions }
 
 struct PetSettingsSheet: Identifiable {
-  enum Kind: String { case sounds, animations, nameLabel }
+  enum Kind: String { case sounds, animations, details }
   let pet: PetPackage
   let kind: Kind
   var id: String { "\(kind.rawValue):\(pet.id)" }
@@ -20,8 +20,6 @@ struct PetSettingsSheet: Identifiable {
 struct SettingsView: View {
   @ObservedObject var app: AppDelegate
   @State private var selectedTab = SettingsTab.pets
-  @State private var renamingPet: PetPackage?
-  @State private var petName = ""
   @State private var search = ""
   @State private var showsCompleted = false
   @State private var assignmentPetID = ""
@@ -81,36 +79,12 @@ struct SettingsView: View {
       agentFilter = nil
       if app.assignedSession(for: id)?.activity == .completed { showsCompleted = true }
     }
-    .onReceive(app.$requestedRenamePetID) { id in
-      guard let id, let pet = app.petPackages.first(where: { $0.id == id }) else { return }
-      selectedTab = .pets
-      petName = app.displayName(for: pet)
-      renamingPet = pet
-    }
     .sheet(item: $app.requestedPetSheet) { sheet in
       switch sheet.kind {
       case .sounds: PetSoundSettingsView(app: app, pet: sheet.pet)
       case .animations: PetAnimationSettingsView(app: app, pet: sheet.pet)
-      case .nameLabel: PetNameLabelSettingsView(app: app, pet: sheet.pet)
+      case .details: PetDetailsView(app: app, pet: sheet.pet)
       }
-    }
-    .alert(
-      localized("Rename Pet"),
-      isPresented: Binding(
-        get: { renamingPet != nil }, set: { if !$0 { renamingPet = nil; app.requestedRenamePetID = nil } }),
-      presenting: renamingPet
-    ) { pet in
-      TextField(localized("Pet Name"), text: $petName)
-      Button(localized("Save")) {
-        app.renamePet(pet.id, to: petName)
-      }
-      .disabled(petName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-      Button(localized("Use Original Name")) {
-        app.renamePet(pet.id, to: "")
-      }
-      Button(localized("Cancel"), role: .cancel) {}
-    } message: { _ in
-      Text(localized("Only the display name changes. Files and session assignments stay the same."))
     }
   }
 
@@ -245,69 +219,13 @@ struct SettingsView: View {
           app.sounds(for: pet.id, role: .notification).count)
       )
       .font(detailFont).foregroundStyle(.secondary).lineLimit(1)
-      HStack(spacing: 6 * uiScale) {
-        Button {
-          app.showPetSettings(pet, kind: .animations)
-        } label: {
-          Image(systemName: "play.rectangle")
-            .font(.system(size: 17 * uiScale))
-            .frame(maxWidth: .infinity, minHeight: 32 * uiScale)
-        }
-        .help(localized("Preview animations"))
-        .accessibilityLabel(localizedFormat("Preview animations for %@", app.displayName(for: pet)))
-        Button {
-          app.showPetSettings(pet, kind: .sounds)
-        } label: {
-          Image(systemName: "speaker.wave.2")
-            .font(.system(size: 17 * uiScale))
-            .frame(maxWidth: .infinity, minHeight: 32 * uiScale)
-        }
-        .help(localized("Sound settings"))
-        .accessibilityLabel(localizedFormat("Sound settings for %@", app.displayName(for: pet)))
-        Menu {
-          Button(localized("Open Agent App")) { app.openAgentApp(for: pet.id) }
-            .disabled(app.assignedSession(for: pet.id) == nil)
-          Button(localized("Change Session…")) { app.requestSessionChange(pet.id) }
-            .disabled(!selected)
-          Divider()
-          Toggle(
-            localized("Lock Position"),
-            isOn: Binding(
-              get: { app.settings.petPreferences[pet.id]?.positionLocked ?? false },
-              set: { app.setPetPreference(pet.id, locked: $0) }))
-          Toggle(
-            localized("Mute This Pet"),
-            isOn: Binding(
-              get: { app.settings.petPreferences[pet.id]?.muted ?? false },
-              set: { app.setPetPreference(pet.id, muted: $0) }))
-          if pet.spriteVersion == .v2 {
-            Picker(localized("Cursor Tracking"), selection: Binding(
-              get: { app.cursorTrackingMode(for: pet.id) },
-              set: { app.setPetPreference(pet.id, cursorTrackingMode: $0) }
-            )) {
-              ForEach(PetCursorTrackingMode.allCases, id: \.self) { mode in
-                Text(localized(mode.rawValue)).tag(mode)
-              }
-            }
-          }
-          Divider()
-          Button(localized("Sounds…")) { app.showPetSettings(pet, kind: .sounds) }
-          Button(localized("Rename Pet…")) { app.requestPetRename(pet.id) }
-          Button(localized("Name Label…")) { app.showPetSettings(pet, kind: .nameLabel) }
-          Button(localized("Animations…")) { app.showPetSettings(pet, kind: .animations) }
-          Menu(localized("Move to Display")) {
-            ForEach(app.availableScreens, id: \.id) { screen in
-              Button(screen.name) { app.movePet(pet.id, to: screen.id) }
-            }
-          }
-          Button(localized("Open Sound Folder…")) { app.openSoundFolder(pet.id) }
-        } label: {
-          Image(systemName: "ellipsis").frame(width: 32 * uiScale, height: 32 * uiScale)
-            .contentShape(Rectangle())
-        }
-        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-        .accessibilityLabel(localized("Pet Options"))
-
+      HStack(alignment: .center, spacing: 6 * uiScale) {
+        petAction(pet, kind: .animations, symbol: "play.rectangle",
+          help: "Preview animations", accessibility: "Preview animations for %@")
+        petAction(pet, kind: .sounds, symbol: "speaker.wave.2",
+          help: "Sound settings", accessibility: "Sound settings for %@")
+        petAction(pet, kind: .details, symbol: "gearshape",
+          help: "Pet Settings", accessibility: "Settings for %@")
       }
     }
     .padding(12 * uiScale)
@@ -320,6 +238,23 @@ struct SettingsView: View {
         .strokeBorder(
           selected ? Color.accentColor : Color.primary.opacity(0.12), lineWidth: selected ? 1.5 : 1)
     )
+  }
+
+  private func petAction(
+    _ pet: PetPackage, kind: PetSettingsSheet.Kind, symbol: String, help: String, accessibility: String
+  ) -> some View {
+    Button {
+      app.showPetSettings(pet, kind: kind)
+    } label: {
+      Image(systemName: symbol)
+        .resizable()
+        .scaledToFit()
+        .frame(width: 20 * uiScale, height: 16 * uiScale)
+        .frame(maxWidth: .infinity)
+        .frame(height: 32 * uiScale, alignment: .center)
+    }
+    .help(localized(help))
+    .accessibilityLabel(localizedFormat(accessibility, app.displayName(for: pet)))
   }
 
   private func openPetSearch() {
@@ -402,7 +337,7 @@ struct SettingsView: View {
         .padding(.vertical, 8 * uiScale)
         VStack(alignment: .leading, spacing: 12) {
           HStack {
-            Text(localized("Scale"))
+            Text(localized("Shared Pet Size"))
             Spacer()
             Text(app.settings.scale.formatted(.percent.precision(.fractionLength(0))))
               .monospacedDigit().foregroundStyle(.secondary)
@@ -411,7 +346,7 @@ struct SettingsView: View {
             value: Binding(get: { app.settings.scale }, set: app.setScale),
             in: 0.5...2, step: 0.05
           ) {
-            Text(localized("Scale"))
+            Text(localized("Shared Pet Size"))
           }
           .labelsHidden()
           HStack {

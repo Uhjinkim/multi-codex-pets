@@ -254,7 +254,10 @@ final class PetSpriteView: NSView {
     if let cached = frameImages[key] {
       cell = cached
     } else {
-      guard let cropped = PetImageDecoder.cell(in: image, frame: frame) else { return }
+      let source = pet.directionLayout?.resolve(frame) ?? (frame: frame, mirrored: false)
+      guard let cropped = PetImageDecoder.cell(
+        in: image, frame: source.frame, mirrored: source.mirrored
+      ) else { return }
       cell = NSImage(cgImage: cropped, size: NSSize(width: PetAtlas.cellWidth, height: PetAtlas.cellHeight))
       frameImages[key] = cell
     }

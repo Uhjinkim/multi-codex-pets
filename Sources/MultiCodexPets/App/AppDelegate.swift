@@ -33,7 +33,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
   @Published private(set) var lastOrcaMessageSender: String?
   @Published var requestedSettingsPetID: String?
   @Published var requestedPetSheet: PetSettingsSheet?
-  @Published var requestedRenamePetID: String?
   private(set) var detectedSessions: [DetectedAgentSession] = []
   private(set) var unlinkedProcesses: [DetectedAgentSession] = []
   private(set) var sessionRouting = SessionRouting() {
@@ -226,7 +225,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
     guard let window = notification.object as? NSWindow, window === settingsWindow?.window else { return }
     requestedSettingsPetID = nil
     requestedPetSheet = nil
-    requestedRenamePetID = nil
   }
 
   func requestSessionChange(_ id: String) {
@@ -237,11 +235,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
   func showPetSettings(_ pet: PetPackage, kind: PetSettingsSheet.Kind) {
     openSettings()
     requestedPetSheet = PetSettingsSheet(pet: pet, kind: kind)
-  }
-
-  func requestPetRename(_ id: String) {
-    openSettings()
-    requestedRenamePetID = id
   }
 
   private func activateSessionSettings() {
@@ -346,7 +339,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
 
   private func refreshPets() {
     let defaults = defaultPetLoader.loadPackages()
-    petPackages = defaults + petLoader.loadPackages(excludingIDs: Set(defaults.map(\.id)))
+    let preferences = settings.petPreferences
+    petPackages = defaults + petLoader.loadPackages(excludingIDs: Set(defaults.map(\.id))).map { pet in
+      var pet = pet
+      if let saved = preferences[pet.id]?.directionLayout,
+        saved.spritesheetHash == pet.spritesheetHash() {
+        pet.directionLayout = saved.layout
+      }
+      return pet
+    }
     previewImages.removeAll()
     updateSelectedPetsAfterPackageRefresh()
     if petCoordinator.isShowingPets {
@@ -371,6 +372,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
 
   func refreshPetsAction() {
     refreshPets()
+  }
+
+  func saveDirectionLayout(_ layout: PetDirectionLayout, for pet: PetPackage, hash: String) -> Bool {
+    guard let current = petPackages.first(where: { $0.id == pet.id && $0.source == .custom }),
+      current.spritesheetURL == pet.spritesheetURL, current.spritesheetHash() == hash
+    else { return false }
+    var values = settings.petPreferences
+    var preference = values[pet.id] ?? PetPreferences()
+    preference.directionLayout = layout == PetDirectionLayout()
+      ? nil : SavedPetDirectionLayout(spritesheetHash: hash, layout: layout)
+    values[pet.id] = preference
+    settings.petPreferences = values
+    petCoordinator.configure(preferences: values, clickVolume: settings.clickVolume, muted: settings.soundsMuted)
+    refreshPets()
+    return true
   }
 
   private func resetSessionNotifications() {
@@ -523,6 +539,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
     let value = min(max(scale.isFinite ? scale : 1, 0.5), 2)
     settings.scale = value
     petCoordinator.setScale(value)
+    rebuildMenu()
+  }
+
+  func setPetScale(_ id: String, to scale: Double?) {
+    var values = settings.petPreferences
+    var preference = values[id] ?? PetPreferences()
+    if let scale {
+      preference.scale = min(max(scale.isFinite ? scale : 1, 0.5), 2)
+    } else {
+      preference.scale = nil
+    }
+    values[id] = preference
+    settings.petPreferences = values
+    petCoordinator.configure(preferences: values, clickVolume: settings.clickVolume, muted: settings.soundsMuted)
     rebuildMenu()
   }
 
@@ -787,16 +817,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
     header.view = headerView
     menu.addItem(header)
     menu.addItem(.separator())
-    let openAgent = actionItem(title: localized("Open Agent App"), action: #selector(openPetAgent(_:)))
-    openAgent.representedObject = id
-    openAgent.isEnabled = session != nil
-    menu.addItem(openAgent)
     let changeSession = actionItem(title: localized("Change Session…"), action: #selector(changePetSession(_:)))
     changeSession.representedObject = id
     changeSession.isEnabled = selectedPetIDs.contains(id)
     menu.addItem(changeSession)
     menu.addItem(.separator())
     let preference = settings.petPreferences[id] ?? PetPreferences()
+    let scaleItem = NSMenuItem(title: localized("Pet Size"), action: nil, keyEquivalent: "")
+    let sizes = NSMenu()
+    sizes.autoenablesItems = false
+    for percent in [0] + Self.petSizePercents {
+      let title = percent == 0 ? localized("Use Shared Size") : "\(percent)%"
+      let item = actionItem(title: title, action: #selector(changePetScale(_:)))
+      item.representedObject = id
+      item.tag = percent
+      let size: Double? = percent == 0 ? nil : Double(percent) / 100
+      item.state = preference.scale == size ? .on : .off
+      sizes.addItem(item)
+    }
+    scaleItem.submenu = sizes
+    menu.addItem(scaleItem)
     for (title, action, checked) in [
       ("Lock Position", #selector(togglePetLock(_:)), preference.positionLocked),
       ("Mute This Pet", #selector(togglePetMute(_:)), preference.muted),
@@ -821,74 +861,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
       menu.addItem(tracking)
     }
     menu.addItem(.separator())
-    for (title, action) in [
-      ("Sounds…", #selector(editPetSounds(_:))),
-      ("Rename Pet…", #selector(editPetName(_:))),
-      ("Name Label…", #selector(editPetNameLabel(_:))),
-      ("Animations…", #selector(previewPetAnimations(_:))),
-    ] {
-      let item = actionItem(title: localized(title), action: action)
-      item.representedObject = id
-      menu.addItem(item)
-    }
-    let displayItem = NSMenuItem(title: localized("Move to Display"), action: nil, keyEquivalent: "")
-    let displays = NSMenu()
-    displays.autoenablesItems = false
-    for screen in availableScreens {
-      let item = actionItem(title: screen.name, action: #selector(movePetToDisplay(_:)))
-      item.representedObject = id
-      item.tag = Int(screen.id)
-      item.state = preference.screenID == screen.id ? .on : .off
-      displays.addItem(item)
-    }
-    displayItem.submenu = displays
-    menu.addItem(displayItem)
-    let folder = actionItem(title: localized("Open Sound Folder…"), action: #selector(openPetSoundFolder(_:)))
-    folder.representedObject = id
-    menu.addItem(folder)
+    let details = actionItem(title: localized("Pet Settings…"), action: #selector(openPetDetails(_:)))
+    details.representedObject = id
+    menu.addItem(details)
     return menu
   }
 
-  @objc private func editPetNameLabel(_ sender: NSMenuItem) {
-    guard let id = sender.representedObject as? String,
-      petPackages.contains(where: { $0.id == id })
-    else { return }
-    guard let pet = petPackages.first(where: { $0.id == id }) else { return }
-    showPetSettings(pet, kind: .nameLabel)
-  }
-
-  @objc private func editPetSounds(_ sender: NSMenuItem) {
+  @objc private func openPetDetails(_ sender: NSMenuItem) {
     guard let id = sender.representedObject as? String,
       let pet = petPackages.first(where: { $0.id == id }) else { return }
-    showPetSettings(pet, kind: .sounds)
-  }
-
-  @objc private func previewPetAnimations(_ sender: NSMenuItem) {
-    guard let id = sender.representedObject as? String,
-      let pet = petPackages.first(where: { $0.id == id }) else { return }
-    showPetSettings(pet, kind: .animations)
-  }
-
-  @objc private func editPetName(_ sender: NSMenuItem) {
-    guard let id = sender.representedObject as? String else { return }
-    requestPetRename(id)
-  }
-
-  @objc private func openPetSoundFolder(_ sender: NSMenuItem) {
-    guard let id = sender.representedObject as? String else { return }
-    openSoundFolder(id)
-  }
-
-  @objc private func movePetToDisplay(_ sender: NSMenuItem) {
-    guard let id = sender.representedObject as? String,
-      let screenID = UInt32(exactly: sender.tag) else { return }
-    movePet(id, to: screenID)
+    showPetSettings(pet, kind: .details)
   }
 
   @objc private func changePetCursorTracking(_ sender: NSMenuItem) {
     guard let values = sender.representedObject as? [String], values.count == 2,
       let mode = PetCursorTrackingMode(rawValue: values[1]) else { return }
     setPetPreference(values[0], cursorTrackingMode: mode)
+  }
+
+  @objc private func changePetScale(_ sender: NSMenuItem) {
+    guard let id = sender.representedObject as? String else { return }
+    setPetScale(id, to: sender.tag == 0 ? nil : Double(sender.tag) / 100)
   }
 
   @objc private func togglePetMute(_ sender: NSMenuItem) {
@@ -903,11 +896,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
     guard let id = sender.representedObject as? String else { return }
     requestSessionChange(id)
   }
-  @objc private func openPetAgent(_ sender: NSMenuItem) {
-    guard let id = sender.representedObject as? String else { return }
-    openAgentApp(for: id)
-  }
-
   func openAgentApp(for id: String) {
     guard let session = assignedSession(for: id)
     else { return }
@@ -959,6 +947,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVAu
       ("150%", 1.5),
     ]
   }
+
+  static let petSizePercents = Array(stride(from: 50, through: 200, by: 25))
 
   var selectedPetIDs: Set<String> {
     Set(settings.selectedPetIDs ?? legacySelectedPetIDs())

@@ -9,6 +9,8 @@ public struct PetPreferences: Codable {
   public var nameLabel: PetNameLabel?
   public var cursorTrackingMode: PetCursorTrackingMode?
   public var soundVolume: Float?
+  public var scale: Double?
+  public var directionLayout: SavedPetDirectionLayout?
 
   public var resolvedSoundVolume: Float {
     guard let soundVolume, soundVolume.isFinite else { return 1 }
@@ -16,6 +18,11 @@ public struct PetPreferences: Codable {
   }
 
   public init() {}
+
+  public func resolvedScale(default defaultScale: Double) -> Double {
+    let value = scale ?? defaultScale
+    return min(max(value.isFinite ? value : 1, 0.5), 2)
+  }
 
   public mutating func setCustomName(_ value: String) {
     let name = value.components(separatedBy: .whitespacesAndNewlines)
