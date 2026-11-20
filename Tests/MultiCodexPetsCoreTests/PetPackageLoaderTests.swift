@@ -42,6 +42,17 @@ final class PetPackageLoaderTests: XCTestCase {
     XCTAssertEqual(packages[0].source, .custom)
   }
 
+  func testLoadsPackagesThroughLinkedPetsDirectory() throws {
+    try writePet(folderName: "alpha", manifest: "{}")
+    let manager = FileManager.default
+    let linkedHome = temporaryDirectory.appendingPathComponent("account", isDirectory: true)
+    try manager.createDirectory(at: linkedHome, withIntermediateDirectories: true)
+    try manager.createSymbolicLink(at: linkedHome.appendingPathComponent("pets"),
+      withDestinationURL: temporaryDirectory.appendingPathComponent("pets"))
+
+    XCTAssertEqual(PetPackageLoader(codexHome: linkedHome).loadPackages().map(\.id), ["alpha"])
+  }
+
   func testExcludesIDsAlreadyUsedByBuiltInPets() throws {
     for name in ["alpha", "codex-default-rocky"] {
       try writePet(folderName: name, manifest: "{}")

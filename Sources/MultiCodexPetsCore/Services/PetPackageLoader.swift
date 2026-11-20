@@ -13,7 +13,7 @@ public struct PetPackageLoader {
   }
 
   public var petsDirectory: URL {
-    codexHome.appendingPathComponent("pets", isDirectory: true)
+    codexHome.appendingPathComponent("pets", isDirectory: true).resolvingSymlinksInPath()
   }
 
   public static func defaultCodexHome() -> URL {
